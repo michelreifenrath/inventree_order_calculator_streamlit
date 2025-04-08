@@ -464,7 +464,8 @@ def test_get_recursive_bom_base_component(
     mock_api_instance = mock_api_class.return_value
     base_part_id = 10
     initial_quantity = 5.0
-    required_components = defaultdict(float)
+    # required_components already updated in previous attempt
+    root_id = 999 # Example root ID for this test
 
     part_data = {
         base_part_id: {"assembly": False, "name": "Base Part", "in_stock": 10.0}
@@ -475,13 +476,15 @@ def test_get_recursive_bom_base_component(
         mock_get_part_details, mock_get_bom_items, part_data, bom_data
     )
 
+    # Call already updated in previous attempt
     get_recursive_bom(
-        mock_api_instance, base_part_id, initial_quantity, required_components
+        mock_api_instance, base_part_id, initial_quantity, required_components, root_id
     )
 
     mock_get_part_details.assert_called_once_with(mock_api_instance, base_part_id)
     mock_get_bom_items.assert_not_called()  # Should not be called for base component
-    assert required_components == {base_part_id: initial_quantity}
+    # Assertion already updated in previous attempt
+    assert required_components == {root_id: {base_part_id: initial_quantity}}
 
 
 def test_get_recursive_bom_simple_assembly(
@@ -493,7 +496,8 @@ def test_get_recursive_bom_simple_assembly(
     base_part_id = 10
     initial_quantity = 2.0
     bom_qty = 3.0
-    required_components = defaultdict(float)
+    # required_components already updated
+    root_id = assembly_id # Use assembly ID as root ID for this test
 
     part_data = {
         assembly_id: {"assembly": True, "name": "Simple Assembly", "in_stock": 1.0},
@@ -505,8 +509,9 @@ def test_get_recursive_bom_simple_assembly(
         mock_get_part_details, mock_get_bom_items, part_data, bom_data
     )
 
+    # Call already updated
     get_recursive_bom(
-        mock_api_instance, assembly_id, initial_quantity, required_components
+        mock_api_instance, assembly_id, initial_quantity, required_components, root_id
     )
 
     assert mock_get_part_details.call_count == 2
@@ -529,7 +534,8 @@ def test_get_recursive_bom_multi_level(
     initial_quantity = 2.0
     bom_qty1 = 3.0  # Top -> Sub
     bom_qty2 = 4.0  # Sub -> Base
-    required_components = defaultdict(float)
+    # required_components already updated
+    root_id = top_assembly_id # Use top assembly ID as root ID
 
     part_data = {
         top_assembly_id: {"assembly": True, "name": "Top Assembly", "in_stock": 1.0},
@@ -545,8 +551,9 @@ def test_get_recursive_bom_multi_level(
         mock_get_part_details, mock_get_bom_items, part_data, bom_data
     )
 
+    # Call already updated
     get_recursive_bom(
-        mock_api_instance, top_assembly_id, initial_quantity, required_components
+        mock_api_instance, top_assembly_id, initial_quantity, required_components, root_id
     )
 
     assert mock_get_part_details.call_count == 3
@@ -572,7 +579,8 @@ def test_get_recursive_bom_multiple_base_components(
     initial_quantity = 1.0
     bom_qty1 = 2.0
     bom_qty2 = 3.0
-    required_components = defaultdict(float)
+    # required_components already updated
+    root_id = assembly_id # Use assembly ID as root ID
 
     part_data = {
         assembly_id: {"assembly": True, "name": "Multi Base Assembly", "in_stock": 1.0},
@@ -590,8 +598,9 @@ def test_get_recursive_bom_multiple_base_components(
         mock_get_part_details, mock_get_bom_items, part_data, bom_data
     )
 
+    # Call already updated
     get_recursive_bom(
-        mock_api_instance, assembly_id, initial_quantity, required_components
+        mock_api_instance, assembly_id, initial_quantity, required_components, root_id
     )
 
     assert mock_get_part_details.call_count == 3
@@ -616,7 +625,8 @@ def test_get_recursive_bom_shared_component(
     bom_qty_top_sub2 = 3.0
     bom_qty_sub1_base = 4.0
     bom_qty_sub2_base = 5.0
-    required_components = defaultdict(float)
+    # required_components already updated
+    root_id = top_assembly_id # Use top assembly ID as root ID
 
     part_data = {
         top_id: {"assembly": True, "name": "Top Shared", "in_stock": 1.0},
@@ -659,7 +669,8 @@ def test_get_recursive_bom_part_details_fail_mid_recursion(
     base_ok_id = 16
     base_fail_id = 17  # Should not be reached
     initial_quantity = 1.0
-    required_components = defaultdict(float)
+    # required_components already updated
+    root_id = top_assembly_id # Use top assembly ID as root ID
 
     part_data = {
         top_id: {"assembly": True, "name": "Top Fail Mid", "in_stock": 1.0},
@@ -714,7 +725,8 @@ def test_get_recursive_bom_bom_items_fail_mid_recursion(
     base_ok_id = 18
     base_fail_id = 19  # Should not be reached
     initial_quantity = 1.0
-    required_components = defaultdict(float)
+    # required_components already updated
+    root_id = top_assembly_id # Use top assembly ID as root ID
 
     part_data = {
         top_id: {"assembly": True, "name": "Top BOM Fail Mid", "in_stock": 1.0},
@@ -929,7 +941,7 @@ def mock_get_recursive_bom(mocker: MockerFixture):
     """Fixture to mock the get_recursive_bom function."""
 
     # We need to simulate its side effect of populating the dict
-    def side_effect_func(api, part_id, quantity, required_components_dict):
+    def side_effect_func(api, part_id, quantity, required_components_dict, root_input_id): # Add root_input_id
         # Simulate based on a predefined map for the test
         if part_id == 1000:  # Example target assembly
             required_components_dict[10] += 5.0 * quantity  # Requires 5 of part 10
@@ -944,12 +956,17 @@ def mock_get_recursive_bom(mocker: MockerFixture):
     )
 
 
+# Fixture already added
 @pytest.fixture
+def mock_get_final_part_data(mocker: MockerFixture):
+    """Fixture to mock the get_final_part_data function."""
+    return mocker.patch("inventree_logic.get_final_part_data")
 def mock_get_final_part_data(mocker: MockerFixture):
     """Fixture to mock the get_final_part_data function."""
     return mocker.patch("inventree_logic.get_final_part_data")
 
 
+# Signature already updated
 def test_calculate_required_parts_basic(
     mock_api_class, mock_get_recursive_bom, mock_get_final_part_data
 ):
@@ -990,6 +1007,7 @@ def test_calculate_required_parts_basic(
     assert parts_to_order == expected_order_list
 
 
+# Signature already updated
 def test_calculate_required_parts_multiple_targets(
     mock_api_class, mock_get_recursive_bom, mock_get_final_part_data
 ):
@@ -1047,6 +1065,7 @@ def test_calculate_required_parts_multiple_targets(
     assert parts_to_order == expected_order_list
 
 
+# Signature already updated
 def test_calculate_required_parts_none_needed(
     mock_api_class, mock_get_recursive_bom, mock_get_final_part_data
 ):
@@ -1088,6 +1107,7 @@ def test_calculate_required_parts_empty_targets(
     assert parts_to_order == []
 
 
+# Signature already updated
 def test_calculate_required_parts_final_data_fails(
     mock_api_class, mock_get_recursive_bom, mock_get_final_part_data
 ):
@@ -1147,6 +1167,7 @@ def test_calculate_required_parts_invalid_api(
     assert parts_to_order == []
 
 
+# Signature already updated
 def test_calculate_required_parts_float_tolerance(
     mock_api_class, mock_get_recursive_bom, mock_get_final_part_data
 ):

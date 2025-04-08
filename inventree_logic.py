@@ -143,7 +143,8 @@ def get_recursive_bom(
     api: InvenTreeAPI,
     part_id: int,
     quantity: float,
-    required_components: defaultdict[int, float],
+    required_components: defaultdict[int, defaultdict[int, float]], # Changed structure
+    root_input_id: int, # Added root ID
 ):
     """
     Recursively processes the BOM using cached data fetching functions.
@@ -168,7 +169,7 @@ def get_recursive_bom(
                 sub_quantity_per = item["quantity"]
                 total_sub_quantity = quantity * sub_quantity_per
                 get_recursive_bom(
-                    api, sub_part_id, total_sub_quantity, required_components
+                    api, sub_part_id, total_sub_quantity, required_components, root_input_id # Pass root ID
                 )
         elif bom_items is None:  # BOM fetch failed
             log.warning(
@@ -178,7 +179,7 @@ def get_recursive_bom(
         log.debug(
             f"Adding base component: {part_details['name']} (ID: {part_id}), Quantity: {quantity}"
         )
-        required_components[part_id] += quantity
+        required_components[root_input_id][part_id] += quantity # Accumulate under root ID
 
 
 @cache_data(ttl=600)
@@ -252,7 +253,7 @@ def get_final_part_data(_api: InvenTreeAPI, part_ids: Tuple[int, ...]) -> Dict[i
 # --- Main Calculation Function ---
 def calculate_required_parts(
     api: InvenTreeAPI, target_assemblies: dict[int, float]
-) -> List[Dict[str, any]]: # Use List/Dict
+) -> List[Dict[str, any]]: # Return type remains List[Dict], but dicts will have more info
     """
     Calculates the list of parts to order based on target assemblies.
     Returns a list of dictionaries, where each dictionary represents a part to order.
@@ -266,15 +267,17 @@ def calculate_required_parts(
         return []
 
     log.info(f"Calculating required components for targets: {target_assemblies}")
-    required_base_components = defaultdict(float)
+    # Changed structure: root_input_id -> {component_id: quantity}
+    required_base_components: defaultdict[int, defaultdict[int, float]] = defaultdict(lambda: defaultdict(float))
 
     # --- Perform Recursive BOM Calculation ---
     for part_id, quantity in target_assemblies.items():
         log.info(f"Processing target assembly ID: {part_id}, Quantity: {quantity}")
         try:
             # Pass only valid IDs (int) and quantities (float)
+            # Pass the target assembly's part_id as the root_input_id
             get_recursive_bom(
-                api, int(part_id), float(quantity), required_base_components
+                api, int(part_id), float(quantity), required_base_components, int(part_id)
             )
         except ValueError:
             log.error(f"Invalid ID ({part_id}) or Quantity ({quantity}). Skipping.")
@@ -290,39 +293,95 @@ def calculate_required_parts(
         return []
 
     # --- Get Final Data (Names & Stock) ---
-    base_component_ids = list(required_base_components.keys())
+    # --- Get Final Data (Names & Stock) for ALL unique components across all groups ---
+    all_unique_component_ids = set()
+    for root_id, components in required_base_components.items():
+        all_unique_component_ids.update(components.keys())
+
+    if not all_unique_component_ids:
+        log.info("No base components found. Nothing to order.")
+        return []
+
+    log.info(f"Total unique base components required across all groups: {len(all_unique_component_ids)}")
     # Pass as tuple for cache key compatibility
-    final_part_data = get_final_part_data(api, tuple(base_component_ids))
+    final_part_data = get_final_part_data(api, tuple(all_unique_component_ids))
+
+    # --- Get Names for Root Input Assemblies ---
+    root_assembly_ids = tuple(target_assemblies.keys())
+    root_assembly_data = get_final_part_data(api, root_assembly_ids) # Reuse existing function
 
     # --- Calculate Order List ---
-    parts_to_order = []
-    log.info("Calculating final order quantities...")
-    for part_id, required_qty in required_base_components.items():
+    # --- Calculate TOTAL required quantity for each unique part across all assemblies ---
+    total_required_quantities = defaultdict(float)
+    for root_id, components in required_base_components.items():
+        for part_id, qty in components.items():
+            total_required_quantities[part_id] += qty
+
+    # --- Calculate GLOBAL order need for each unique part ---
+    global_parts_to_order_amount = {}
+    log.info("Calculating global order quantities...")
+    for part_id, total_required in total_required_quantities.items():
         part_data = final_part_data.get(part_id)
-        if not part_data:  # Handle cases where final data fetch failed for an ID
-            log.warning(f"Missing final data for Part ID {part_id}. Using defaults.")
-            part_data = {"name": f"Unknown (ID: {part_id})", "in_stock": 0.0}
+        if not part_data:
+            log.warning(f"Missing final data for Part ID {part_id} during global calculation. Assuming 0 stock.")
+            in_stock = 0.0
+        else:
+            in_stock = part_data.get("in_stock", 0.0)
 
-        in_stock = part_data.get("in_stock", 0.0)  # Default to 0 if missing
-        part_name = part_data.get("name", f"Unknown (ID: {part_id})")
-        to_order = required_qty - in_stock
+        global_to_order = total_required - in_stock
+        # Reason: Use tolerance for float comparison
+        if global_to_order > 0.001:
+            global_parts_to_order_amount[part_id] = round(global_to_order, 3)
+        else:
+             global_parts_to_order_amount[part_id] = 0.0 # Store 0 if no global order needed
 
-        # Reason: Use a small tolerance (0.001) for floating-point comparison instead of `> 0` to avoid issues with tiny precision errors leading to unnecessary orders.
-        if to_order > 0.001:
-            parts_to_order.append(
+    # --- Collect all root assembly names where each globally needed part is used ---
+    part_to_root_assemblies = defaultdict(set)
+    for root_id, components in required_base_components.items():
+        root_assembly_name = root_assembly_data.get(root_id, {}).get("name", f"Unknown Assembly (ID: {root_id})")
+        for part_id in components.keys():
+            # Check if part needs global ordering before adding its assembly name
+            if global_parts_to_order_amount.get(part_id, 0.0) > 0:
+                 part_to_root_assemblies[part_id].add(root_assembly_name)
+
+    # --- Build the final FLAT list for display ---
+    final_flat_parts_list = []
+    log.info("Building final flat list with assembly context...")
+    # Iterate through the parts that need global ordering
+    for part_id, global_to_order in global_parts_to_order_amount.items():
+         if global_to_order > 0: # Only include parts that actually need ordering
+            part_data = final_part_data.get(part_id)
+            if not part_data:
+                log.error(f"Data inconsistency: Missing final data for globally needed Part ID {part_id}.")
+                part_name = f"Error - Missing Data (ID: {part_id})"
+                in_stock = 0.0
+                # Attempt to get total required even if final data is missing
+                total_required = total_required_quantities.get(part_id, 0.0)
+            else:
+                part_name = part_data.get("name", f"Unknown Component (ID: {part_id})")
+                in_stock = part_data.get("in_stock", 0.0)
+                total_required = total_required_quantities[part_id] # Already calculated
+
+            # Get the sorted list of assembly names for this part
+            used_in_assemblies_list = sorted(list(part_to_root_assemblies.get(part_id, set())))
+            used_in_assemblies_str = ", ".join(used_in_assemblies_list)
+
+            final_flat_parts_list.append(
                 {
                     "pk": part_id,
                     "name": part_name,
-                    "required": round(required_qty, 3),
-                    "in_stock": round(in_stock, 3),
-                    "to_order": round(to_order, 3),
+                    "total_required": round(total_required, 3), # Total needed across all inputs
+                    "in_stock": round(in_stock, 3), # Global stock
+                    "to_order": global_to_order, # Global amount to order
+                    "used_in_assemblies": used_in_assemblies_str, # New field
                 }
             )
 
-    # Sort by name
-    parts_to_order.sort(key=lambda x: x["name"])
-    log.info(f"Calculation finished. Parts to order: {len(parts_to_order)}")
-    return parts_to_order
+    # Sort the final flat list by part name
+    final_flat_parts_list.sort(key=lambda x: x["name"])
+
+    log.info(f"Calculation finished. Parts to order: {len(final_flat_parts_list)}")
+    return final_flat_parts_list
 
 
 # (Die Funktion save_results_to_markdown kann hier bleiben oder in die Streamlit App verschoben werden,

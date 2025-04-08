@@ -2,6 +2,7 @@
 import streamlit as st
 import pandas as pd
 from collections import defaultdict
+# import itertools # No longer needed for groupby
 import logging
 import os  # Import os module
 from dotenv import load_dotenv  # Import load_dotenv
@@ -92,7 +93,7 @@ else:
 if "target_assemblies" not in st.session_state:
     if default_part_id:
          # Initialisiere mit dem ersten Teil aus der Kategorie als Standard
-        st.session_state.target_assemblies = [{"id": default_part_id, "quantity": 1.0}]
+        st.session_state.target_assemblies = [{"id": default_part_id, "quantity": 1}] # Use integer for default quantity
     else:
         # Fallback, wenn keine Teile geladen wurden
         st.session_state.target_assemblies = []
@@ -108,7 +109,7 @@ st.sidebar.header("🎯 Ziel-Assemblies definieren")
 def add_assembly_input() -> None:
     """Adds a new row for assembly/quantity input using the default part ID."""
     if default_part_id:
-        st.session_state.target_assemblies.append({"id": default_part_id, "quantity": 1.0})
+        st.session_state.target_assemblies.append({"id": default_part_id, "quantity": 1}) # Use integer for added quantity
     else:
         # Verhindere das Hinzufügen, wenn keine Teile zur Auswahl stehen
         st.warning("Kann keine Zeile hinzufügen, da keine Teile in der Kategorie gefunden wurden.")
@@ -168,32 +169,33 @@ else:
                 options=part_names,
                 index=current_index,
                 key=f"select_{i}", # Keep index-based key
-                help="Wähle ein Teil aus der InvenTree Kategorie.",
+                help="Wähle ein Teil aus der InvenTree Kategorie. Lange Namen werden ggf. gekürzt.", # Add note about truncation
             )
 
         with cols[1]:
             # Render number input and store the new quantity
             new_qty = st.number_input(
                 f"Menge #{i+1}",
-                value=assembly_state.get("quantity", 1.0), # Use .get for safety
+                value=int(assembly_state.get("quantity", 1)), # Ensure integer value
                 key=f"qty_{i}", # Keep index-based key
-                min_value=0.01,
-                step=0.1,
-                format="%.2f",
-                help="Benötigte Menge dieses Teils.",
+                min_value=1, # Minimum quantity is 1
+                step=1, # Step by whole numbers
+                format="%d", # Display as integer
+                help="Benötigte Stückzahl dieses Teils (nur ganze Zahlen).", # Update help text
             )
 
         # Prepare updates for this index after rendering
         if selected_name is not None and new_qty is not None:
              new_id = part_name_to_id.get(selected_name, default_part_id) # Fallback auf Default ID
-             updates_to_apply[i] = {"id": new_id, "quantity": new_qty}
+             # Ensure quantity is stored as int, but new_qty from number_input might be float if user types decimal point
+             updates_to_apply[i] = {"id": new_id, "quantity": int(new_qty)}
 
 
     # Apply all collected updates to the session state *after* the loop
     for index, update_data in updates_to_apply.items():
         if index < len(st.session_state.target_assemblies): # Check index validity
              st.session_state.target_assemblies[index]["id"] = update_data["id"]
-             st.session_state.target_assemblies[index]["quantity"] = update_data["quantity"]
+             st.session_state.target_assemblies[index]["quantity"] = int(update_data["quantity"]) # Ensure integer in state
 
 
 
@@ -221,9 +223,9 @@ if calculate_pressed:
     # Bereite das Dictionary für die Logik-Funktion vor
     # Reason: Filter out invalid entries (ID or quantity <= 0) before passing to the calculation logic.
     targets_dict = {
-        int(a["id"]): float(a["quantity"])
+        int(a["id"]): float(a["quantity"]) # Convert back to float for the logic function
         for a in st.session_state.target_assemblies
-        if a.get("id") and a["id"] > 0 and a.get("quantity") and a["quantity"] > 0 # Check if keys exist
+        if a.get("id") and int(a["id"]) > 0 and a.get("quantity") and int(a["quantity"]) > 0 # Check integer quantity > 0
     }
 
     if not targets_dict:
@@ -261,28 +263,65 @@ if calculate_pressed:
 # --- Ergebnisse anzeigen ---
 st.header("📋 Ergebnisse: Benötigte Teile")
 
-if st.session_state.results is not None:
-    if len(st.session_state.results) > 0:
-        # Konvertiere die Ergebnisliste in einen Pandas DataFrame für bessere Darstellung
-        df = pd.DataFrame(st.session_state.results)
-        # Passe Spaltenreihenfolge und -namen an (optional)
-        df_display = df[["pk", "name", "required", "in_stock", "to_order"]]
+# Color palette no longer needed
+# COLOR_PALETTE = [
+#     "#E0F2F7", # Light Cyan
+#     "#E8F5E9", # Light Green
+#     "#FFF9C4", # Light Yellow
+#     "#FCE4EC", # Light Pink
+# ] # End of commented out palette
+
+if st.session_state.results is not None: # Ensure this is at the correct base indentation level
+    results_list = st.session_state.results # This is now the flat list
+    if len(results_list) > 0:
+        # --- Flat List Display ---
+        df_full = pd.DataFrame(results_list)
+
+        # Select and rename columns for display
+        # Include the new 'used_in_assemblies' column
+        df_display = df_full[[
+            "pk",
+            "name",
+            "total_required", # Use the total required quantity
+            "in_stock",
+            "to_order", # This is the global amount
+            "used_in_assemblies", # Add the new column
+        ]]
         df_display.columns = [
             "Part ID",
             "Name",
-            "Benötigt",
-            "Auf Lager",
-            "Zu bestellen",
+            "Gesamt benötigt", # Updated name
+            "Auf Lager (Global)", # Clarify stock
+            "Zu bestellen (Global)", # Clarify order amount
+            "Verwendet in Assemblies", # New column name
         ]
-
         st.dataframe(df_display, use_container_width=True, hide_index=True)
 
-        # Optional: Download-Button für CSV oder Markdown
-        csv = df_display.to_csv(index=False).encode("utf-8")
+        # --- CSV Download (using the same flat structure) ---
+        # df_full is already created above
+        # Reorder columns for CSV clarity
+        df_csv = df_full[[
+            "pk",
+            "name",
+            "total_required",
+            "in_stock",
+            "to_order",
+            "used_in_assemblies",
+        ]]
+        # Use the same column names as the display table for consistency
+        df_csv.columns = [
+            "Part ID",
+            "Name",
+            "Gesamt benötigt",
+            "Auf Lager (Global)",
+            "Zu bestellen (Global)",
+            "Verwendet in Assemblies",
+        ]
+        csv_data = df_csv.to_csv(index=False).encode("utf-8")
         st.download_button(
-            label="💾 Ergebnisse als CSV herunterladen",
-            data=csv,
-            file_name="inventree_order_list.csv",
+            label="💾 Ergebnisse als CSV herunterladen", # Simpler label now
+            data=csv_data,
+            file_name="inventree_order_list.csv", # Revert filename
             mime="text/csv",
         )
 

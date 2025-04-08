@@ -10,8 +10,8 @@ This project provides a Streamlit web application to calculate the required base
 - Multiple parts can be added to the list.
 - Recursively calculates the total required quantity for each base component based on the BOMs of the target assemblies.
 - Fetches current stock levels for base components from InvenTree.
-- Displays a table listing the parts that need to be ordered (required quantity > stock quantity).
-- Allows downloading the order list as a CSV file.
+- Displays the parts that need to be ordered, **grouped by the initial input assembly**, with color-highlighted headers for each group.
+- Allows downloading the **grouped order list** (including input assembly information) as a CSV file.
 - Uses Streamlit caching to optimize performance by reducing redundant API calls.
 
 ## Project Structure
@@ -76,8 +76,8 @@ This project provides a Streamlit web application to calculate the required base
 3.  The application will attempt to connect to your InvenTree instance using the credentials loaded from the `.env` file.
 4.  Use the sidebar to select the target parts from the dropdown list (populated from Category 191) and enter the quantity required for each. Use the "Add Row" / "Remove Last" buttons to manage the list.
 5.  Click the "Teilebedarf berechnen" (Calculate Parts Needed) button.
-6.  The results table will show the base components required, their current stock, and the quantity to order.
-7.  Use the "Download Results as CSV" button to save the order list.
+6.  The results section will show the base components required, their current stock, and the quantity to order, **grouped by the input assembly** with colored headers.
+7.  Use the "Download Results (with group info) as CSV" button to save the complete order list, including the input assembly context for each part.
 8.  Use the "Berechnung zurücksetzen" (Reset Calculation) button to clear the results and start a new calculation.
 
 ## Development
