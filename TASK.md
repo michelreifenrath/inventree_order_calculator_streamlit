@@ -8,9 +8,17 @@
 - Create basic project files (`README.md`, `PLANNING.md`).
 - Create `tests/` directory.
 - Initialize Git repository and make initial commit.
-
+- **Feature:** Sort and group the output list of required parts by their parent input assembly part, so users can see which sub-parts belong to which input assembly. (2025-04-08)
 ## Future Tasks / Discovered During Work
-- (Add tasks as they arise)
+- **Style (`app.py`):** Add Type Hints and Google-style Docstrings to functions.
+- **Style (All):** Add `# Reason:` comments for non-obvious logic (e.g., float tolerance in `inventree_logic.py`).
+- **Testing:** Create unit tests for `inventree_logic.py` in `tests/` (mocking API calls).
+- **Modularity:** Decide fate of `calculate_order_needs.py` (archive or delete).
+- **Documentation:** Update file structure diagrams in `README.md` and `PLANNING.md` to reflect `.env` usage.
+- **Formatting:** Run `black .` on the project.
 
 ## Completed Tasks
+- Check if the project fulfills the project rules (2025-04-08).
 - (Move completed tasks here)
+- **Feature:** Add a "Restart Calculation" button to `app.py` to allow users to clear results and start over (2025-04-08).
+- **Feature:** Replace Part ID input with dropdown from Category 191 (all parts) (2025-04-08). Ref: `FEATURE_PLAN_CategoryDropdown.md`

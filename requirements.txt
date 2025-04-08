@@ -2,5 +2,6 @@ streamlit
 pandas
 inventree
 python-dotenv
-# Add pytest later when tests are implemented
-# Add black later for formatting checks if needed in CI/CD
+pytest # For running unit tests
+pytest-mock # For mocking API calls in tests
+black # For code formatting

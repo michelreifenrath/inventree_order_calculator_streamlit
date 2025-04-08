@@ -5,7 +5,9 @@ This project provides a Streamlit web application to calculate the required base
 ## Features
 
 - Connects to a specified InvenTree instance using API credentials.
-- Allows users to define a list of target assembly parts and their desired quantities via the web interface.
+- Allows users to select target parts from a predefined InvenTree category (currently Category 191) using a dropdown menu in the sidebar.
+- Users can define the desired quantity for each selected part.
+- Multiple parts can be added to the list.
 - Recursively calculates the total required quantity for each base component based on the BOMs of the target assemblies.
 - Fetches current stock levels for base components from InvenTree.
 - Displays a table listing the parts that need to be ordered (required quantity > stock quantity).
@@ -17,15 +19,16 @@ This project provides a Streamlit web application to calculate the required base
 ```
 .
 ├── .venv/                # Python virtual environment (Gitignored)
+├── archive/              # Archived scripts
+│   └── calculate_order_needs.py # Original script
 ├── tests/                # Pytest unit tests
-│   └── test_inventree_logic.py # Tests for core logic (to be created)
+│   └── test_inventree_logic.py # Tests for core logic
 ├── .env                  # Environment variables (API Credentials - Gitignored)
 ├── .gitignore            # Git ignore rules
 ├── .roo/
 │   └── rules/
 │       └── rules.md      # Roo's rules for this project
 ├── app.py                # Main Streamlit application file
-├── calculate_order_needs.py # Original script (will likely be removed/archived later)
 ├── IDEA.md               # Initial idea and plan description
 ├── inventree_logic.py    # Core logic for InvenTree interaction and BOM calculation
 ├── PLANNING.md           # Project planning details
@@ -71,10 +74,11 @@ This project provides a Streamlit web application to calculate the required base
     ```
 2.  Your web browser should automatically open to the application's URL (usually `http://localhost:8501`).
 3.  The application will attempt to connect to your InvenTree instance using the credentials loaded from the `.env` file.
-4.  Use the sidebar to define the target assembly Part IDs and the quantity required for each.
-5.  Click the "Calculate Parts Needed" button.
+4.  Use the sidebar to select the target parts from the dropdown list (populated from Category 191) and enter the quantity required for each. Use the "Add Row" / "Remove Last" buttons to manage the list.
+5.  Click the "Teilebedarf berechnen" (Calculate Parts Needed) button.
 6.  The results table will show the base components required, their current stock, and the quantity to order.
 7.  Use the "Download Results as CSV" button to save the order list.
+8.  Use the "Berechnung zurücksetzen" (Reset Calculation) button to clear the results and start a new calculation.
 
 ## Development
 
