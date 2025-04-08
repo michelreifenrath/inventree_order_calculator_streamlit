@@ -115,23 +115,19 @@ def add_assembly_input() -> None:
         st.warning("Kann keine Zeile hinzufügen, da keine Teile in der Kategorie gefunden wurden.")
 
 
-# Funktion zum Entfernen der letzten Assembly-Zeile
-def remove_assembly_input() -> None:
-    """Removes the last assembly ID/quantity input row from the session state."""
-    if len(st.session_state.target_assemblies) > 0:
-        st.session_state.target_assemblies.pop()
+# Funktion zum Entfernen einer bestimmten Assembly-Zeile
+def remove_assembly_row(index_to_remove: int) -> None:
+    """Removes the assembly input row at the specified index."""
+    if 0 <= index_to_remove < len(st.session_state.target_assemblies):
+        del st.session_state.target_assemblies[index_to_remove]
+    else:
+        log.warning(f"Attempted to remove invalid index: {index_to_remove}")
 
-
-# Buttons zum Hinzufügen/Entfernen im Sidebar
-col1, col2 = st.sidebar.columns(2)
-with col1:
-    st.button(
-        "➕ Zeile hinzufügen", on_click=add_assembly_input, use_container_width=True
-    )
-with col2:
-    st.button(
-        "➖ Letzte entfernen", on_click=remove_assembly_input, use_container_width=True
-    )
+# Button zum Hinzufügen im Sidebar
+st.sidebar.button(
+    "➕ Zeile hinzufügen", on_click=add_assembly_input, use_container_width=True
+)
+# Removed the "Letzte entfernen" button and its column
 
 
 # Zeige Eingabefelder für jede Assembly in der Liste
@@ -142,8 +138,10 @@ else:
     updates_to_apply = {}
 
     for i, assembly_state in enumerate(st.session_state.target_assemblies):
+        # Add a third column for the remove button
         cols = st.sidebar.columns(
-            [0.6, 0.4] # Adjust column widths for selectbox + number input
+            [0.5, 0.3, 0.2] # Adjust widths: Selectbox, Number Input, Remove Button
+            # Removed vertical_alignment
         )
         selected_name = None
         new_qty = None
@@ -183,12 +181,24 @@ else:
                 format="%d", # Display as integer
                 help="Benötigte Stückzahl dieses Teils (nur ganze Zahlen).", # Update help text
             )
+        with cols[2]: # Indented
+             # Add manual vertical space to push button down
+             st.markdown("<br>", unsafe_allow_html=True)
+             st.button(
+                         "➖",
+                         key=f"remove_{i}",
+                         # Use lambda with default argument to capture index
+                         on_click=lambda idx=i: remove_assembly_row(idx),
+                         # Removed args=(i,)
+                         help="Diese Zeile entfernen"
+                     ) # Removed extra st.button(
 
         # Prepare updates for this index after rendering
+        # Prepare updates for this index after rendering (Indented)
         if selected_name is not None and new_qty is not None:
              new_id = part_name_to_id.get(selected_name, default_part_id) # Fallback auf Default ID
              # Ensure quantity is stored as int, but new_qty from number_input might be float if user types decimal point
-             updates_to_apply[i] = {"id": new_id, "quantity": int(new_qty)}
+             updates_to_apply[i] = {"id": new_id, "quantity": int(new_qty)} # Indented inside if
 
 
     # Apply all collected updates to the session state *after* the loop
@@ -233,31 +243,39 @@ if calculate_pressed:
             "⚠️ Bitte mindestens ein gültiges Teil mit Menge (> 0) auswählen/eingeben."
         )
     else:
-        with st.spinner(
-            "⏳ Berechne benötigte Teile... (Dies kann bei komplexen BOMs dauern)"
-        ):
-            try:
-                # Rufe die Kernlogik auf
-                parts_to_order = calculate_required_parts(api, targets_dict)
-                st.session_state.results = (
-                    parts_to_order  # Speichere Ergebnisse im Session State
-                )
-                if not parts_to_order:
-                    st.success(
-                        "✅ Alle benötigten Komponenten sind ausreichend auf Lager."
-                    )
-                else:
-                    st.success(
-                        f"✅ Berechnung abgeschlossen. {len(parts_to_order)} Teile müssen bestellt werden."
-                    )
+        # Define progress bar and callback
+        progress_bar = st.progress(0, text="Starting calculation...")
+        def update_progress(value, text):
+            progress_bar.progress(value, text=text)
 
-            except Exception as e:
-                st.error(f"Ein Fehler ist während der Berechnung aufgetreten: {e}")
-                log.error(
-                    "Fehler während calculate_required_parts in Streamlit App:",
-                    exc_info=True,
+        # No longer need spinner, use progress bar context
+        # with st.spinner(...):
+        try:
+            # Rufe die Kernlogik auf, übergib den Callback
+            parts_to_order = calculate_required_parts(
+                api, targets_dict, progress_callback=update_progress
+            )
+            # Correct indentation for this block
+            st.session_state.results = (
+                parts_to_order  # Speichere Ergebnisse im Session State
+            )
+            if not parts_to_order:
+                st.success(
+                    "✅ Alle benötigten Komponenten sind ausreichend auf Lager."
                 )
-                st.session_state.results = None  # Setze Ergebnisse bei Fehler zurück
+            else:
+                st.success(
+                    f"✅ Berechnung abgeschlossen. {len(parts_to_order)} Teile müssen bestellt werden."
+                )
+
+        except Exception as e:
+            # Correct indentation for this block
+            st.error(f"Ein Fehler ist während der Berechnung aufgetreten: {e}")
+            log.error(
+                "Fehler während calculate_required_parts in Streamlit App:",
+                exc_info=True,
+            )
+            st.session_state.results = None  # Setze Ergebnisse bei Fehler zurück (Unindented)
 
 
 # --- Ergebnisse anzeigen ---
@@ -277,15 +295,21 @@ if st.session_state.results is not None: # Ensure this is at the correct base in
         # --- Flat List Display ---
         df_full = pd.DataFrame(results_list)
 
+        # Create a summary string for purchase orders
+        df_full["Bestellungen"] = df_full.get("purchase_orders", []).apply(
+            # Update f-string to include quantity
+            lambda po_list: ", ".join([f"{po.get('ref', '')} ({po.get('quantity', 0)} Stk, Status: {po.get('status', '')})" for po in po_list]) if po_list else "Keine"
+        )
+
         # Select and rename columns for display
-        # Include the new 'used_in_assemblies' column
         df_display = df_full[[
             "pk",
             "name",
             "total_required", # Use the total required quantity
             "in_stock",
             "to_order", # This is the global amount
-            "used_in_assemblies", # Add the new column
+            "used_in_assemblies", # Existing column
+            "Bestellungen", # New column with PO info
         ]]
         df_display.columns = [
             "Part ID",
@@ -293,9 +317,19 @@ if st.session_state.results is not None: # Ensure this is at the correct base in
             "Gesamt benötigt", # Updated name
             "Auf Lager (Global)", # Clarify stock
             "Zu bestellen (Global)", # Clarify order amount
-            "Verwendet in Assemblies", # New column name
+            "Verwendet in Assemblies", # Existing column
+            "Bestellungen", # New column name
         ]
-        st.dataframe(df_display, use_container_width=True, hide_index=True)
+        st.data_editor(
+            df_display,
+            column_config={
+                "Name": st.column_config.TextColumn(width="large"),
+                "Bestellungen": st.column_config.TextColumn(width="large"),
+            },
+            use_container_width=True,
+            hide_index=True,
+            disabled=True
+        )
 
         # --- CSV Download (using the same flat structure) ---
         # df_full is already created above
@@ -307,6 +341,7 @@ if st.session_state.results is not None: # Ensure this is at the correct base in
             "in_stock",
             "to_order",
             "used_in_assemblies",
+            "Bestellungen",
         ]]
         # Use the same column names as the display table for consistency
         df_csv.columns = [
@@ -316,6 +351,7 @@ if st.session_state.results is not None: # Ensure this is at the correct base in
             "Auf Lager (Global)",
             "Zu bestellen (Global)",
             "Verwendet in Assemblies",
+            "Bestellungen",
         ]
         csv_data = df_csv.to_csv(index=False).encode("utf-8")
         st.download_button(

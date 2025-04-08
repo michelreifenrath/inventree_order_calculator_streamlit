@@ -3,7 +3,7 @@ import os
 import sys
 import logging
 from collections import defaultdict
-from typing import List, Dict, Optional, Tuple # Added List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Callable # Added Callable
 from inventree.api import InvenTreeAPI
 from inventree.part import Part
 from streamlit import cache_data, cache_resource  # Streamlit caching importieren
@@ -252,7 +252,9 @@ def get_final_part_data(_api: InvenTreeAPI, part_ids: Tuple[int, ...]) -> Dict[i
 
 # --- Main Calculation Function ---
 def calculate_required_parts(
-    api: InvenTreeAPI, target_assemblies: dict[int, float]
+    api: InvenTreeAPI,
+    target_assemblies: dict[int, float],
+    progress_callback: Optional[Callable[[int, str], None]] = None, # Add progress callback
 ) -> List[Dict[str, any]]: # Return type remains List[Dict], but dicts will have more info
     """
     Calculates the list of parts to order based on target assemblies.
@@ -270,9 +272,25 @@ def calculate_required_parts(
     # Changed structure: root_input_id -> {component_id: quantity}
     required_base_components: defaultdict[int, defaultdict[int, float]] = defaultdict(lambda: defaultdict(float))
 
+    # --- Get Names for Root Input Assemblies (Moved Earlier for Progress Bar) ---
+    root_assembly_ids = tuple(target_assemblies.keys())
+    root_assembly_data = get_final_part_data(api, root_assembly_ids) # Fetch details once
+
     # --- Perform Recursive BOM Calculation ---
-    for part_id, quantity in target_assemblies.items():
+    num_targets = len(target_assemblies) # Get total number of assemblies
+    # Use enumerate to track progress
+    for index, (part_id, quantity) in enumerate(target_assemblies.items()):
         log.info(f"Processing target assembly ID: {part_id}, Quantity: {quantity}")
+        # --- Detailed Progress Update ---
+        if progress_callback and num_targets > 0:
+            # Scale progress for this section (e.g., 10% to 40%)
+            current_progress = 10 + int(((index + 1) / num_targets) * 30)
+            # Get assembly name from pre-fetched data
+            part_name = root_assembly_data.get(part_id, {}).get("name", f"ID {part_id}")
+            progress_text = f"Calculating BOM for '{part_name}' ({index + 1}/{num_targets})"
+            progress_callback(current_progress, progress_text)
+        # --- End Progress Update ---
+
         try:
             # Pass only valid IDs (int) and quantities (float)
             # Pass the target assembly's part_id as the root_input_id
@@ -293,6 +311,8 @@ def calculate_required_parts(
         return []
 
     # --- Get Final Data (Names & Stock) ---
+    if progress_callback:
+        progress_callback(40, "Fetching part details...")
     # --- Get Final Data (Names & Stock) for ALL unique components across all groups ---
     all_unique_component_ids = set()
     for root_id, components in required_base_components.items():
@@ -306,11 +326,8 @@ def calculate_required_parts(
     # Pass as tuple for cache key compatibility
     final_part_data = get_final_part_data(api, tuple(all_unique_component_ids))
 
-    # --- Get Names for Root Input Assemblies ---
-    root_assembly_ids = tuple(target_assemblies.keys())
-    root_assembly_data = get_final_part_data(api, root_assembly_ids) # Reuse existing function
-
     # --- Calculate Order List ---
+    # (Fetching root assembly data moved before the BOM calculation loop)
     # --- Calculate TOTAL required quantity for each unique part across all assemblies ---
     total_required_quantities = defaultdict(float)
     for root_id, components in required_base_components.items():
@@ -318,6 +335,8 @@ def calculate_required_parts(
             total_required_quantities[part_id] += qty
 
     # --- Calculate GLOBAL order need for each unique part ---
+    if progress_callback:
+        progress_callback(60, "Calculating order amounts...")
     global_parts_to_order_amount = {}
     log.info("Calculating global order quantities...")
     for part_id, total_required in total_required_quantities.items():
@@ -347,6 +366,18 @@ def calculate_required_parts(
     # --- Build the final FLAT list for display ---
     final_flat_parts_list = []
     log.info("Building final flat list with assembly context...")
+
+    # Purchase order status code to label mapping
+    PO_STATUS_MAP = {
+        10: "Pending",
+        20: "In Progress",
+        30: "Complete",
+        40: "Cancelled",
+        50: "Lost",
+        60: "Returned",
+        70: "On Hold",
+    }
+
     # Iterate through the parts that need global ordering
     for part_id, global_to_order in global_parts_to_order_amount.items():
          if global_to_order > 0: # Only include parts that actually need ordering
@@ -366,6 +397,42 @@ def calculate_required_parts(
             used_in_assemblies_list = sorted(list(part_to_root_assemblies.get(part_id, set())))
             used_in_assemblies_str = ", ".join(used_in_assemblies_list)
 
+            # --- Fetch purchase order info ---
+            if progress_callback:
+                # Update progress more granularly if needed, here just once before the loop
+                progress_callback(80, f"Checking purchase orders for {part_name}...")
+            purchase_orders_info = []
+            try:
+                from inventree.company import SupplierPart
+                supplier_parts = SupplierPart.list(api, part=part_id)
+                for sp in supplier_parts:
+                    try:
+                        from inventree.purchase_order import PurchaseOrderLineItem, PurchaseOrder
+                        po_lines = PurchaseOrderLineItem.list(api, part=sp.pk)
+                        for line in po_lines:
+                            order_id = line._data.get('order')
+                            try:
+                                order = PurchaseOrder(api, pk=order_id)
+                                ref = order._data.get('reference', 'No Ref')
+                                status_code = order._data.get('status', 'Unknown')
+                                # Convert status code to label if possible
+                                status_label = PO_STATUS_MAP.get(status_code, str(status_code))
+                                # Only include if status is Pending or In Progress
+                                if status_label in ("Pending", "In Progress"):
+                                    # Extract quantity from the line item
+                                    quantity = line._data.get('quantity', 0)
+                                    purchase_orders_info.append({
+                                        "ref": ref,
+                                        "status": status_label,
+                                        "quantity": quantity # Add quantity
+                                    })
+                            except Exception:
+                                continue
+                    except Exception:
+                        continue
+            except Exception:
+                purchase_orders_info = []
+
             final_flat_parts_list.append(
                 {
                     "pk": part_id,
@@ -374,9 +441,12 @@ def calculate_required_parts(
                     "in_stock": round(in_stock, 3), # Global stock
                     "to_order": global_to_order, # Global amount to order
                     "used_in_assemblies": used_in_assemblies_str, # New field
+                    "purchase_orders": purchase_orders_info, # New field with PO info
                 }
             )
-
+    # Final progress update
+    if progress_callback:
+        progress_callback(100, "Finalizing...")
     # Sort the final flat list by part name
     final_flat_parts_list.sort(key=lambda x: x["name"])
 
