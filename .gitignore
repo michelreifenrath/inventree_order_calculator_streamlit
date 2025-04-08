@@ -138,6 +138,9 @@ cython_debug/
 # Streamlit secrets
 .streamlit/secrets.toml
 
+# Environment variables
+.env # Ignore the actual secrets file
+
 # OS generated files
 .DS_Store
 Thumbs.db

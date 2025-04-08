@@ -3,6 +3,8 @@ import streamlit as st
 import pandas as pd
 from collections import defaultdict
 import logging
+import os # Import os module
+from dotenv import load_dotenv # Import load_dotenv
 
 # Importiere die refaktorierte Logik
 from inventree_logic import connect_to_inventree, calculate_required_parts
@@ -16,20 +18,17 @@ st.title("📊 InvenTree Order Calculator")
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 log = logging.getLogger(__name__)
 
-# --- Verbindung zur API (mit Caching aus inventree_logic) ---
-# Secrets werden automatisch von st.secrets geladen, wenn die Datei existiert
-try:
-    inventree_url = st.secrets["INVENTREE_URL"]
-    inventree_token = st.secrets["INVENTREE_TOKEN"]
-except KeyError:
-    st.error("🚨 Fehler: INVENTREE_URL und INVENTREE_TOKEN nicht in st.secrets gefunden!")
-    st.info("Bitte erstelle eine `.streamlit/secrets.toml` Datei mit deinen Zugangsdaten.")
-    st.stop() # Hält die App-Ausführung an
-except FileNotFoundError:
-    st.error("🚨 Fehler: `.streamlit/secrets.toml` Datei nicht gefunden!")
-    st.info("Bitte erstelle die Datei `.streamlit/secrets.toml` mit deinen Zugangsdaten.")
-    st.stop() # Hält die App-Ausführung an
+# --- Lade Umgebungsvariablen aus .env Datei ---
+load_dotenv()
 
+# --- Verbindung zur API (mit Caching aus inventree_logic) ---
+inventree_url = os.getenv("INVENTREE_URL")
+inventree_token = os.getenv("INVENTREE_TOKEN")
+
+if not inventree_url or not inventree_token:
+    st.error("🚨 Fehler: INVENTREE_URL und/oder INVENTREE_TOKEN nicht in der .env Datei oder Umgebungsvariablen gefunden!")
+    st.info("Bitte erstelle eine `.env` Datei im Projektverzeichnis mit deinen Zugangsdaten:\n\nINVENTREE_URL=\"YOUR_URL\"\nINVENTREE_TOKEN=\"YOUR_TOKEN\"")
+    st.stop() # Hält die App-Ausführung an
 
 api = connect_to_inventree(inventree_url, inventree_token)
 
