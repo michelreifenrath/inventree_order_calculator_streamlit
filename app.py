@@ -12,6 +12,10 @@ from inventree_logic import (
     connect_to_inventree,
     calculate_required_parts,
     get_parts_in_category, # Import the new function
+    # Import functions whose cache needs clearing
+    get_part_details,
+    get_bom_items,
+    get_final_part_data,
 )
 
 # --- Streamlit App Konfiguration ---
@@ -216,7 +220,16 @@ st.header("⚙️ Berechnung steuern")
 def reset_calculation() -> None:
     """Clears the calculation results stored in the session state."""
     st.session_state.results = None
-    st.info("Berechnung zurückgesetzt. Du kannst neue Werte eingeben oder erneut berechnen.") # Optional: Feedback geben
+    # Clear relevant caches
+    try:
+        get_part_details.clear()
+        get_bom_items.clear()
+        get_final_part_data.clear()
+        # Optional: Clear category cache too?
+        # get_parts_in_category.clear()
+        st.info("Berechnung zurückgesetzt und Cache für Teile-/BOM-Daten gelöscht. Die nächste Berechnung holt frische Daten.")
+    except Exception as e:
+        st.warning(f"Ergebnisse zurückgesetzt, aber Fehler beim Löschen des Caches: {e}")
 
 # Buttons in Spalten anordnen
 col_calc, col_reset = st.columns(2)
@@ -315,8 +328,8 @@ if st.session_state.results is not None: # Ensure this is at the correct base in
             "Part ID",
             "Name",
             "Gesamt benötigt", # Updated name
-            "Auf Lager (Global)", # Clarify stock
-            "Zu bestellen (Global)", # Clarify order amount
+            "Auf Lager", # Removed (Global)
+            "Zu bestellen", # Removed (Global)
             "Verwendet in Assemblies", # Existing column
             "Bestellungen", # New column name
         ]
@@ -348,8 +361,8 @@ if st.session_state.results is not None: # Ensure this is at the correct base in
             "Part ID",
             "Name",
             "Gesamt benötigt",
-            "Auf Lager (Global)",
-            "Zu bestellen (Global)",
+            "Auf Lager", # Removed (Global)
+            "Zu bestellen", # Removed (Global)
             "Verwendet in Assemblies",
             "Bestellungen",
         ]

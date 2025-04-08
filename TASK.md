@@ -15,6 +15,7 @@
 - **Modularity:** Decide fate of `calculate_order_needs.py` (archive or delete).
 - **Documentation:** Update file structure diagrams in `README.md` and `PLANNING.md` to reflect `.env` usage.
 - **Formatting:** Run `black .` on the project.
+- **Deployment:** Publish the project to a GitHub repository.
 ## Completed Tasks
 - Check if the project fulfills the project rules (2025-04-08).
 - (Move completed tasks here)

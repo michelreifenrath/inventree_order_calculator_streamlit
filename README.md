@@ -101,6 +101,18 @@ This is the easiest way to run the application with Docker.
     docker-compose down
     ```
 
+5.  **Updating the Application:**
+    When you want to update the application with the latest code changes from your Git repository:
+    a.  Pull the latest changes into your local project directory:
+        ```bash
+        git pull origin master # Or 'main' depending on your branch name
+        ```
+    b.  Rebuild the Docker image and restart the container with the new code:
+        ```bash
+        docker-compose up --build -d # The '-d' runs it in detached mode (background)
+        ```
+    ```
+
 **Method 2: Using Docker commands directly**
 
 1.  **Build the Docker image:**
@@ -131,7 +143,26 @@ This is the easiest way to run the application with Docker.
   ```bash
   black .
   ```
+## Publishing to GitHub
+
+To publish this project to a GitHub repository:
+
+1.  **Create a new repository on GitHub:** Go to [GitHub.com](https://github.com) and create a new, empty repository. Do *not* initialize it with a README, .gitignore, or license.
+2.  **Commit your local changes:** Make sure all your desired files are added and committed locally. If you haven't committed the Docker changes yet:
+    ```bash
+    git add .
+    git commit -m "feat: Add Docker support with Dockerfile and Docker Compose"
+    ```
+3.  **Link your local repository to GitHub:** Replace `<YOUR_GITHUB_REPO_URL>` with the URL provided by GitHub for your new repository (usually ends in `.git`).
+    ```bash
+    git remote add origin <YOUR_GITHUB_REPO_URL>
+    ```
+4.  **Push your code to GitHub:** Push your local `master` (or `main`) branch to the remote repository.
+    ```bash
+    git push -u origin master # Or 'main'
+    ```
 
 ## Contributing
 
+Please refer to `PLANNING.md` and `TASK.md` for ongoing work and project guidelines. Follow the established code style and testing practices.
 Please refer to `PLANNING.md` and `TASK.md` for ongoing work and project guidelines. Follow the established code style and testing practices.
