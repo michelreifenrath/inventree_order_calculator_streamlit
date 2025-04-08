@@ -1,0 +1,5 @@
+streamlit
+pandas
+inventree
+# Add pytest later when tests are implemented
+# Add black later for formatting checks if needed in CI/CD
