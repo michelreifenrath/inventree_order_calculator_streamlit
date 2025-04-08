@@ -1,0 +1,13 @@
+version: '3.8' # Specify the Compose file format version
+
+services:
+  app:
+    build: . # Build the image from the Dockerfile in the current directory
+    container_name: inventree-order-calculator-app # Optional: Give the container a specific name
+    ports:
+      - "8501:8501" # Map host port 8501 to container port 8501
+    env_file:
+      - .env # Load environment variables from the .env file in the current directory
+    # Optional: Add volumes if you want live code changes reflected without rebuilding (useful for development)
+    # volumes:
+    #   - .:/app # Mount the current directory to /app in the container

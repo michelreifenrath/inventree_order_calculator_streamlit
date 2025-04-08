@@ -80,6 +80,47 @@ This project provides a Streamlit web application to calculate the required base
 7.  Use the "Download Results (with group info) as CSV" button to save the complete order list, including the input assembly context for each part.
 8.  Use the "Berechnung zurücksetzen" (Reset Calculation) button to clear the results and start a new calculation.
 
+## Running with Docker
+
+You can build and run this application using Docker and Docker Compose. Make sure you have both installed.
+
+**Method 1: Using Docker Compose (Recommended)**
+
+This is the easiest way to run the application with Docker.
+
+1.  **Ensure `.env` file exists:** Make sure you have created the `.env` file in the project root directory with your InvenTree credentials as described in the [Setup](#setup) section.
+2.  **Start the application:** Navigate to the project's root directory in your terminal and run:
+    ```bash
+    docker-compose up --build
+    ```
+    - `docker-compose up`: Starts the services defined in `docker-compose.yml`.
+    - `--build`: Builds the Docker image before starting the container (necessary the first time or if you change the code/Dockerfile).
+3.  **Access the application:** Open your web browser and go to `http://localhost:8501`.
+4.  **Stop the application:** Press `Ctrl+C` in the terminal where `docker-compose up` is running, or run the following command from another terminal in the same directory:
+    ```bash
+    docker-compose down
+    ```
+
+**Method 2: Using Docker commands directly**
+
+1.  **Build the Docker image:**
+    Navigate to the project's root directory and run:
+    ```bash
+    docker build -t inventree-order-calculator .
+    ```
+
+2.  **Run the Docker container:**
+    You need to pass your InvenTree credentials (from the `.env` file) and map the Streamlit port (8501).
+    ```bash
+    # Make sure your .env file exists in the current directory
+    docker run --rm -p 8501:8501 --env-file .env inventree-order-calculator
+    ```
+    - `--rm`: Automatically removes the container when it exits.
+    - `-p 8501:8501`: Maps port 8501 on your host machine to port 8501 inside the container.
+    - `--env-file .env`: Loads environment variables from your local `.env` file into the container. **Ensure your `.env` file is present in the directory where you run this command.**
+
+3.  Access the application in your browser at `http://localhost:8501`.
+
 ## Development
 
 - **Testing:** Run unit tests using `pytest`:

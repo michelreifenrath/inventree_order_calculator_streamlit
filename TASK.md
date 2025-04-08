@@ -15,10 +15,10 @@
 - **Modularity:** Decide fate of `calculate_order_needs.py` (archive or delete).
 - **Documentation:** Update file structure diagrams in `README.md` and `PLANNING.md` to reflect `.env` usage.
 - **Formatting:** Run `black .` on the project.
-
 ## Completed Tasks
 - Check if the project fulfills the project rules (2025-04-08).
 - (Move completed tasks here)
 - **Feature:** Add a "Restart Calculation" button to `app.py` to allow users to clear results and start over (2025-04-08).
 - **Feature:** Replace Part ID input with dropdown from Category 191 (all parts) (2025-04-08). Ref: `FEATURE_PLAN_CategoryDropdown.md`
 - **Feature:** Sort and group the output list of required parts by their parent input assembly part, with color highlighting. (2025-04-08)
+- **Deployment:** Implement the app as a Docker container (`Dockerfile`, `.dockerignore`, `docker-compose.yml`) (2025-04-08).

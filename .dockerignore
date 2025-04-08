@@ -1,0 +1,45 @@
+# Git files
+.git/
+.gitignore
+
+# Python virtual environment
+.venv/
+venv/
+*/.venv/
+*/venv/
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE / Editor specific files
+.vscode/
+.idea/
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Environment files (should be passed at runtime, not built into image)
+.env
+*.env
+
+# Test cache
+.pytest_cache/
+
+# Archives
+archive/
+
+# Documentation/Planning (unless needed inside container)
+# IDEA.md
+# PLANNING.md
+# TASK.md
+# README.md
+# FEATURE_PLAN_CategoryDropdown.md
+# PLAN_GROUPING.md
+# test_inventree_po.py # Assuming this is a test script not needed in production
+
+# Roo files
+.roo/
