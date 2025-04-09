@@ -7,16 +7,23 @@ import logging
 import os  # Import os module
 from dotenv import load_dotenv  # Import load_dotenv
 
-# Importiere die refaktorierte Logik
+# Importiere die refaktorierte Logik und UI Elemente
 from inventree_logic import (
-    connect_to_inventree,
     calculate_required_parts,
-    get_parts_in_category, # Import the new function
-    # Import functions whose cache needs clearing
-    get_part_details,
-    get_bom_items,
-    get_final_part_data,
+    # Functions needed for cache clearing are now in helpers, but might be needed if called directly elsewhere
+    # If not called directly, they can be removed from here. Assuming they might be needed for reset.
+    # get_part_details,
+    # get_bom_items,
+    # get_final_part_data
 )
+from inventree_api_helpers import (
+    connect_to_inventree, # Import from new location
+    get_parts_in_category, # Import from new location
+    get_part_details, # Needed for cache clearing
+    get_bom_items,    # Needed for cache clearing
+    get_final_part_data # Needed for cache clearing
+)
+from streamlit_ui_elements import render_assembly_inputs, render_results_table # Import UI functions
 
 # --- Streamlit App Konfiguration ---
 st.set_page_config(page_title="InvenTree Order Calculator", layout="wide")
@@ -105,116 +112,19 @@ if "target_assemblies" not in st.session_state:
 if "results" not in st.session_state:
     st.session_state.results = None  # Hier speichern wir die Berechnungsergebnisse
 
-# --- UI für Eingaben (Target Assemblies) ---
-st.sidebar.header("🎯 Ziel-Assemblies definieren")
-
-
-# Funktion zum Hinzufügen einer neuen Zeile für Assembly-Eingabe
-def add_assembly_input() -> None:
-    """Adds a new row for assembly/quantity input using the default part ID."""
-    if default_part_id:
-        st.session_state.target_assemblies.append({"id": default_part_id, "quantity": 1}) # Use integer for added quantity
-    else:
-        # Verhindere das Hinzufügen, wenn keine Teile zur Auswahl stehen
-        st.warning("Kann keine Zeile hinzufügen, da keine Teile in der Kategorie gefunden wurden.")
-
-
-# Funktion zum Entfernen einer bestimmten Assembly-Zeile
-def remove_assembly_row(index_to_remove: int) -> None:
-    """Removes the assembly input row at the specified index."""
-    if 0 <= index_to_remove < len(st.session_state.target_assemblies):
-        del st.session_state.target_assemblies[index_to_remove]
-    else:
-        log.warning(f"Attempted to remove invalid index: {index_to_remove}")
-
-# Button zum Hinzufügen im Sidebar
-st.sidebar.button(
-    "➕ Zeile hinzufügen", on_click=add_assembly_input, use_container_width=True
+# --- Render UI für Eingaben (Target Assemblies) using the imported function ---
+render_assembly_inputs(
+    part_names=part_names,
+    part_name_to_id=part_name_to_id,
+    part_id_to_name=part_id_to_name,
+    default_part_id=default_part_id,
+    target_category_id=TARGET_CATEGORY_ID
 )
-# Removed the "Letzte entfernen" button and its column
-
-
-# Zeige Eingabefelder für jede Assembly in der Liste
-if not part_names:
-    st.sidebar.warning(f"Keine Teile in Kategorie {TARGET_CATEGORY_ID} zum Auswählen verfügbar.")
-else:
-    # Store updates temporarily to apply after rendering both widgets in a row
-    updates_to_apply = {}
-
-    for i, assembly_state in enumerate(st.session_state.target_assemblies):
-        # Add a third column for the remove button
-        cols = st.sidebar.columns(
-            [0.5, 0.3, 0.2] # Adjust widths: Selectbox, Number Input, Remove Button
-            # Removed vertical_alignment
-        )
-        selected_name = None
-        new_qty = None
-
-        with cols[0]:
-            # Finde den Index des aktuell gespeicherten Teils für die Vorauswahl
-            current_id = assembly_state.get("id") # Use .get for safety
-            current_name = part_id_to_name.get(current_id)
-            try:
-                # Setze Index basierend auf dem Namen, der zur ID gehört
-                current_index = part_names.index(current_name) if current_name in part_names else 0
-            except ValueError:
-                 # Fallback, falls die gespeicherte ID nicht (mehr) in der Liste ist
-                current_index = 0
-                # Optional: Setze die ID im State auf den Default zurück, wenn sie ungültig wird
-                # Note: Doing this here might trigger extra reruns, consider if needed
-                # if default_part_id:
-                #     st.session_state.target_assemblies[i]["id"] = default_part_id
-
-            # Render selectbox and store the selected name
-            selected_name = st.selectbox(
-                f"Teil auswählen #{i+1}",
-                options=part_names,
-                index=current_index,
-                key=f"select_{i}", # Keep index-based key
-                help="Wähle ein Teil aus der InvenTree Kategorie. Lange Namen werden ggf. gekürzt.", # Add note about truncation
-            )
-
-        with cols[1]:
-            # Render number input and store the new quantity
-            new_qty = st.number_input(
-                f"Menge #{i+1}",
-                value=int(assembly_state.get("quantity", 1)), # Ensure integer value
-                key=f"qty_{i}", # Keep index-based key
-                min_value=1, # Minimum quantity is 1
-                step=1, # Step by whole numbers
-                format="%d", # Display as integer
-                help="Benötigte Stückzahl dieses Teils (nur ganze Zahlen).", # Update help text
-            )
-        with cols[2]: # Indented
-             # Add manual vertical space to push button down
-             st.markdown("<br>", unsafe_allow_html=True)
-             st.button(
-                         "➖",
-                         key=f"remove_{i}",
-                         # Use lambda with default argument to capture index
-                         on_click=lambda idx=i: remove_assembly_row(idx),
-                         # Removed args=(i,)
-                         help="Diese Zeile entfernen"
-                     ) # Removed extra st.button(
-
-        # Prepare updates for this index after rendering
-        # Prepare updates for this index after rendering (Indented)
-        if selected_name is not None and new_qty is not None:
-             new_id = part_name_to_id.get(selected_name, default_part_id) # Fallback auf Default ID
-             # Ensure quantity is stored as int, but new_qty from number_input might be float if user types decimal point
-             updates_to_apply[i] = {"id": new_id, "quantity": int(new_qty)} # Indented inside if
-
-
-    # Apply all collected updates to the session state *after* the loop
-    for index, update_data in updates_to_apply.items():
-        if index < len(st.session_state.target_assemblies): # Check index validity
-             st.session_state.target_assemblies[index]["id"] = update_data["id"]
-             st.session_state.target_assemblies[index]["quantity"] = int(update_data["quantity"]) # Ensure integer in state
 
 
 
 # --- Berechnungs- und Reset-Buttons ---
-st.header("⚙️ Berechnung steuern")
+st.header("⚙️ Berechnung & Filter")
 
 # Funktion zum Zurücksetzen der Ergebnisse
 def reset_calculation() -> None:
@@ -222,15 +132,35 @@ def reset_calculation() -> None:
     st.session_state.results = None
     # Clear relevant caches
     try:
+        # Clear caches from the correct module
+        from inventree_api_helpers import get_part_details, get_bom_items, get_final_part_data, get_parts_in_category
         get_part_details.clear()
         get_bom_items.clear()
         get_final_part_data.clear()
         # Optional: Clear category cache too?
         # get_parts_in_category.clear()
+        # Optional: Clear category cache too?
+        # get_parts_in_category.clear() # Already cleared above if uncommented
         st.info("Berechnung zurückgesetzt und Cache für Teile-/BOM-Daten gelöscht. Die nächste Berechnung holt frische Daten.")
     except Exception as e:
         st.warning(f"Ergebnisse zurückgesetzt, aber Fehler beim Löschen des Caches: {e}")
 
+# --- Filter Options ---
+# Define the supplier and manufacturer to exclude
+SUPPLIER_TO_EXCLUDE = "HAIP Solutions GmbH" # Corrected to supplier name
+# Add a manufacturer to exclude if needed, otherwise leave as None or empty string
+MANUFACTURER_TO_EXCLUDE = "" # Example: "Example Manufacturer Inc."
+
+# Add checkbox for supplier exclusion
+exclude_supplier = st.checkbox(f"Teile von '{SUPPLIER_TO_EXCLUDE}' ausschließen", value=True, key="exclude_supplier_checkbox") # Default to True as requested
+
+# Add checkbox for manufacturer exclusion (only if a name is defined)
+exclude_manufacturer = False
+if MANUFACTURER_TO_EXCLUDE:
+    exclude_manufacturer = st.checkbox(f"Teile von Hersteller '{MANUFACTURER_TO_EXCLUDE}' ausschließen", value=False, key="exclude_manufacturer_checkbox")
+
+
+# --- Calculation and Reset Buttons ---
 # Buttons in Spalten anordnen
 col_calc, col_reset = st.columns(2)
 
@@ -265,8 +195,17 @@ if calculate_pressed:
         # with st.spinner(...):
         try:
             # Rufe die Kernlogik auf, übergib den Callback
+            # Determine the supplier and manufacturer names to exclude based on checkbox states
+            supplier_to_exclude_arg = SUPPLIER_TO_EXCLUDE if exclude_supplier else None
+            manufacturer_to_exclude_arg = MANUFACTURER_TO_EXCLUDE if exclude_manufacturer else None
+
+            # Call the core logic with both exclusion parameters
             parts_to_order = calculate_required_parts(
-                api, targets_dict, progress_callback=update_progress
+                api,
+                targets_dict,
+                exclude_supplier_name=supplier_to_exclude_arg,     # Pass supplier exclusion
+                exclude_manufacturer_name=manufacturer_to_exclude_arg, # Pass manufacturer exclusion
+                progress_callback=update_progress
             )
             # Correct indentation for this block
             st.session_state.results = (
@@ -292,123 +231,8 @@ if calculate_pressed:
 
 
 # --- Ergebnisse anzeigen ---
-st.header("📋 Ergebnisse: Benötigte Teile")
-
-# Color palette no longer needed
-# COLOR_PALETTE = [
-#     "#E0F2F7", # Light Cyan
-#     "#E8F5E9", # Light Green
-#     "#FFF9C4", # Light Yellow
-#     "#FCE4EC", # Light Pink
-# ] # End of commented out palette
-
-if st.session_state.results is not None: # Ensure this is at the correct base indentation level
-    results_list = st.session_state.results # This is now the flat list
-    if len(results_list) > 0:
-        # --- Flat List Display ---
-        df_full = pd.DataFrame(results_list)
-
-        # Defensive check: Ensure DataFrame is not empty and has required columns
-        required_cols = {"pk", "name", "total_required", "available_stock", "to_order", "used_in_assemblies", "purchase_orders"}
-        if df_full.empty or not required_cols.issubset(df_full.columns):
-            st.error("Interner Fehler: Berechnungsdaten sind ungültig oder unvollständig.")
-            log.error(f"Invalid DataFrame created from results_list. Columns: {df_full.columns}. Missing: {required_cols - set(df_full.columns)}")
-            # Optionally clear results or stop further processing
-            st.session_state.results = None # Clear potentially bad results
-        else: # This else corresponds to the defensive check
-            # All the following code needs to be indented one level deeper
-            # Proceed with DataFrame manipulation only if valid
-
-            # Create a summary string for purchase orders
-            df_full["Bestellungen"] = df_full.get("purchase_orders", []).apply(
-                # Update f-string to include quantity
-                lambda po_list: ", ".join([f"{po.get('ref', '')} ({po.get('quantity', 0)} Stk, Status: {po.get('status', '')})" for po in po_list]) if po_list else "Keine"
-            )
-
-            # Create URL column for linking
-            base_url = "https://lager.haip.solutions/"
-            # Corrected: Use 'pk' column which exists in df_full
-            df_full['Part URL'] = df_full['pk'].apply(lambda pk: f"{base_url}platform/part/{pk}/") # Use new path structure
-
-            # Select columns for display (including Name and the hidden URL)
-            df_display = df_full[[
-                "name", # Keep original name column
-                "Part URL", # Add URL column (will be hidden)
-                "total_required",
-                "available_stock",
-                "to_order",
-                "used_in_assemblies",
-                "Bestellungen",
-            ]]
-            # Update column headers (Part URL won't be shown)
-            df_display.columns = [
-                "Name",
-                "Part ID", # Change header for the URL column
-                "Gesamt benötigt", # Updated name
-                "Verfügbar", # Changed from "Auf Lager"
-                "Zu bestellen", # Removed (Global)
-                "Verwendet in Assemblies", # Existing column
-                "Bestellungen", # New column name
-            ]
-            st.data_editor(
-                df_display,
-                column_config={
-                     "Name": st.column_config.TextColumn(width="large"), # Keep Name as Text
-                     "Part ID": st.column_config.LinkColumn( # Apply LinkColumn to the URL column
-                        # Use regex to display only the part ID number from the new URL structure
-                        display_text=r"https://lager.haip.solutions/platform/part/(\d+)/",
-                        validate=r"^https://lager.haip.solutions/platform/part/\d+/$", # Validate new URL format
-                        help="Klicken, um das Teil in InvenTree zu öffnen",
-                        width="small"
-                     ),
-                     "Bestellungen": st.column_config.TextColumn(width="large"),
-                },
-                use_container_width=True,
-                hide_index=True,
-                # disabled=True # Re-enable disabled=True if needed, but links won't work
-            )
-
-            # --- CSV Download (using the same flat structure) ---
-            # df_full is guaranteed to be valid here
-            # Reorder columns for CSV clarity
-            df_csv = df_full[[
-                "pk",
-                "name",
-                "total_required",
-                "available_stock", # Changed from in_stock
-                "to_order",
-                "used_in_assemblies",
-                "Bestellungen",
-            ]]
-            # Use the same column names as the display table for consistency
-            df_csv.columns = [
-                "Part ID",
-                "Name",
-                "Gesamt benötigt",
-                "Verfügbar", # Changed from "Auf Lager"
-                "Zu bestellen", # Removed (Global)
-                "Verwendet in Assemblies",
-                "Bestellungen",
-            ]
-            csv_data = df_csv.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                label="💾 Ergebnisse als CSV herunterladen", # Simpler label now
-                data=csv_data,
-                file_name="inventree_order_list.csv", # Revert filename
-                mime="text/csv",
-            )
-        # End of the 'else' block for valid DataFrame
-
-        # Optional: Markdown-Ausgabe (wie im Original-Skript)
-        # Hier könntest du die save_results_to_markdown Funktion importieren und nutzen
-        # oder den Markdown-String direkt erstellen und mit st.markdown anzeigen/downloaden.
-
-    elif len(st.session_state.results) == 0 and st.session_state.results is not None:
-        # Reason: Explicitly handle the case where calculation succeeded (`results` is not None) but yielded an empty list (no parts to order).
-        # This provides clearer feedback in the results section than just relying on the success message after calculation.
-        st.info("👍 Alle Teile auf Lager, keine Bestellung notwendig.")
-else:
-    st.info("Klicke auf 'Teilebedarf berechnen', um die Ergebnisse anzuzeigen.")
+# Call the function from the UI elements module to render the results
+render_results_table(st.session_state.get("results"))
 
 # Optional: Auto-refresh (siehe IDEA.md für Details zur Implementierung)
 # from streamlit_autorefresh import st_autorefresh

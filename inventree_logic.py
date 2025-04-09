@@ -3,147 +3,43 @@ import os
 import sys
 import logging
 from collections import defaultdict
-from typing import List, Dict, Optional, Tuple, Callable # Added Callable
+from typing import List, Dict, Optional, Tuple, Callable
 from inventree.api import InvenTreeAPI
 from inventree.part import Part
+# Import SupplierPart for type hinting if needed, handle potential ImportError later
+try:
+    from inventree.company import SupplierPart, Company
+    from inventree.purchase_order import PurchaseOrderLineItem, PurchaseOrder
+    IMPORTS_AVAILABLE = True
+except ImportError:
+    IMPORTS_AVAILABLE = False
+    # Initialize logger early to log the warning
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+    log = logging.getLogger(__name__)
+    log.warning("Could not import SupplierPart/Company/PurchaseOrder related classes. PO/Supplier checks might be limited.")
+
+
 from streamlit import cache_data, cache_resource  # Streamlit caching importieren
 
-# Configure logging (kann auch in der Streamlit App konfiguriert werden)
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+# Configure logging (ensure it's configured even if imports fail)
+if 'log' not in locals():
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+    log = logging.getLogger(__name__)
+
+# Import API helper functions
+from inventree_api_helpers import (
+    # Assuming connect_to_inventree is only used here via api object passed in
+    get_part_details,
+    get_bom_items,
+    # get_parts_in_category, # Not used directly in this file anymore
+    get_final_part_data,
+    _chunk_list # Import the chunking helper
 )
-log = logging.getLogger(__name__)
-
-# --- Helper Functions (angepasst für Streamlit Caching) ---
-
-
-# Cache API connection - hält die Verbindung über Re-Runs offen
-@cache_resource
-def connect_to_inventree(url, token):
-    """Connects to the InvenTree API and returns the API object."""
-    log.info("Attempting to connect to InvenTree API...")
-    try:
-        api = InvenTreeAPI(url, token=token)
-        log.info(f"Connected to InvenTree API version: {api.api_version}")
-        return api
-    except Exception as e:
-        log.error(f"Failed to connect to InvenTree API: {e}", exc_info=True)
-        # In Streamlit, it's better to raise the exception or return None and handle it in the UI
-        return None
+# Import purchase order classes conditionally for PO fetching logic
+# Already handled by the try/except block at the top
 
 
-# Cache data fetching functions - vermeidet wiederholte API calls für gleiche Inputs
-@cache_data(ttl=600)  # Cache results for 10 minutes
-def get_part_details(_api: InvenTreeAPI, part_id: int) -> Optional[Dict[str, any]]: # Use Optional/Dict
-    """Gets part details (assembly, name, stock) from API."""
-    log.debug(f"Fetching part details from API for: {part_id}")
-    try:
-        # Stelle sicher, dass _api ein gültiges API-Objekt ist
-        if not _api:
-            log.error("API object is invalid in get_part_details.")
-            return None
-        part = Part(_api, pk=part_id)
-        if not part or not part.pk:
-            log.warning(f"Could not retrieve part details for ID {part_id} from API.")
-            return None
-
-        details = {
-            "assembly": part.assembly,
-            "name": part.name,
-            "in_stock": float(
-                part._data.get("in_stock", 0) or 0
-            ),
-            "is_template": bool(part._data.get("is_template", False)),
-            "variant_stock": float(part._data.get("variant_stock", 0) or 0),
-        }
-        return details
-    except Exception as e:
-        log.error(f"Error fetching part details for ID {part_id}: {e}")
-        return None
-
-
-@cache_data(ttl=600)
-def get_bom_items(_api: InvenTreeAPI, part_id: int) -> Optional[List[Dict[str, any]]]: # Use Optional/List/Dict
-    """Gets BOM items for a part ID from API."""
-    log.debug(f"Fetching BOM from API for: {part_id}")
-    try:
-        if not _api:
-            log.error("API object is invalid in get_bom_items.")
-            return None
-        # Check if it's an assembly first (using cached detail fetch)
-        part_details = get_part_details(_api, part_id)
-        if not part_details or not part_details["assembly"]:
-            log.debug(f"Part {part_id} is not an assembly or details failed. No BOM.")
-            return []  # Return empty list for non-assemblies
-
-        part = Part(_api, pk=part_id)  # Re-fetch Part object to call method
-        bom_items_raw = part.getBomItems()
-        if bom_items_raw:
-            bom_data = [
-                {
-                    "sub_part": item.sub_part,
-                    "quantity": float(item.quantity),
-                    "allow_variants": bool(getattr(item, "allow_variants", True)),
-                }
-                for item in bom_items_raw
-            ]
-            return bom_data
-        else:
-            log.debug(f"Assembly {part_id} has an empty BOM.")
-            return []  # Return empty list
-    except Exception as e:
-        log.error(f"Error fetching BOM items for part ID {part_id}: {e}")
-        return None  # Indicate failure
-
-@cache_data(ttl=600) # Cache results for 10 minutes
-def get_parts_in_category(
-    _api: InvenTreeAPI, category_id: int
-) -> Optional[List[Dict[str, any]]]:
-    """
-    Fetches parts belonging to a specific category using Part.list().
-
-    Args:
-        _api (InvenTreeAPI): The connected InvenTree API object.
-        category_id (int): The ID of the category to fetch parts from.
-
-    Returns:
-        Optional[List[Dict[str, any]]]: A list of dictionaries, each containing 'pk' and 'name'
-                                         for a part in the category, or None if an error occurs.
-                                         Returns an empty list if the category is empty or no parts are found.
-    """
-    log.info(f"Fetching parts from API for category ID: {category_id}")
-    try:
-        if not _api:
-            log.error("API object is invalid in get_parts_in_category.")
-            return None
-
-        # Fetch parts using Part.list with category filter and specific fields
-        # Reason: Use list() to evaluate the potential generator returned by Part.list immediately.
-        # Reason: Specify fields=['pk', 'name'] for efficiency, only fetching required data.
-        parts_list = list(
-            Part.list(_api, category=category_id, fields=["pk", "name"])
-        )
-
-        if not parts_list:
-            log.info(f"No parts found in category {category_id}.")
-            return [] # Return empty list if category is empty
-
-        # Convert Part objects to simple dictionaries (although fields should limit this)
-        result_list = [
-            {"pk": part.pk, "name": part.name}
-            for part in parts_list if part.pk and part.name # Basic validation
-        ]
-
-        log.info(f"Successfully fetched {len(result_list)} parts from category {category_id}.")
-        # Sort parts alphabetically by name for consistent dropdown order
-        result_list.sort(key=lambda x: x["name"])
-        return result_list
-
-    except Exception as e:
-        log.error(f"Error fetching parts for category ID {category_id}: {e}", exc_info=True)
-        return None # Indicate failure
-
-
+# --- BOM Calculation Logic ---
 
 def get_recursive_bom(
     api: InvenTreeAPI,
@@ -151,389 +47,373 @@ def get_recursive_bom(
     quantity: float,
     required_components: defaultdict[int, defaultdict[int, float]],
     root_input_id: int,
-    template_only_flags: defaultdict[int, bool], # Track parts where variants are disallowed
+    template_only_flags: defaultdict[int, bool],
+    all_encountered_part_ids: set[int], # New parameter to collect all IDs
 ):
-    """
-    Recursively processes the BOM using cached data fetching functions.
-    NOTE: This function itself is NOT cached with @cache_data because its side effect
-          is modifying the 'required_components' dictionary, and caching might lead
-          to stale results if underlying BOMs change rapidly between runs within the ttl.
-          The caching happens on the lower-level fetch functions.
-    """
-    part_details = get_part_details(api, part_id)  # Uses cached function
+    """Recursively processes the BOM using cached data fetching functions."""
+    # Uses get_part_details and get_bom_items imported from inventree_api_helpers
+    all_encountered_part_ids.add(part_id) # Add current part ID
+    part_details = get_part_details(api, part_id)
     if not part_details:
         log.warning(f"Skipping part ID {part_id} due to fetch error in recursion.")
         return
 
     if part_details["assembly"]:
-        log.debug(
-            f"Processing assembly: {part_details['name']} (ID: {part_id}), Quantity: {quantity}"
-        )
-        bom_items = get_bom_items(api, part_id)  # Uses cached function
-        if bom_items:  # Check if BOM fetch succeeded and is not empty
+        log.debug(f"Processing assembly: {part_details['name']} (ID: {part_id}), Quantity: {quantity}")
+        bom_items = get_bom_items(api, part_id)
+        if bom_items:
             for item in bom_items:
                 sub_part_id = item["sub_part"]
+                all_encountered_part_ids.add(sub_part_id) # Add sub-part ID
                 sub_quantity_per = item["quantity"]
-                allow_variants = item["allow_variants"] # Get flag from updated get_bom_items
+                allow_variants = item["allow_variants"]
                 total_sub_quantity = quantity * sub_quantity_per
-
-                # Fetch sub-part details to check if it's a template
-                sub_part_details = get_part_details(api, sub_part_id)
+                sub_part_details = get_part_details(api, sub_part_id) # Fetch details of sub-part
                 if not sub_part_details:
                     log.warning(f"Skipping sub-part ID {sub_part_id} in BOM for {part_id} due to fetch error.")
                     continue
-
                 is_template = sub_part_details.get("is_template", False)
                 is_assembly = sub_part_details.get("assembly", False)
-
-                # --- Variant Handling Logic ---
                 if is_template and not allow_variants:
-                    # Template part, but variants NOT allowed for this specific BOM line.
-                    # Mark this part ID as needing "template only" stock check later.
                     template_only_flags[sub_part_id] = True
-                    # Add requirement for the template part itself (it's a base component in this context)
-                    log.debug(
-                        f"Adding template component (variants disallowed): {sub_part_details['name']} (ID: {sub_part_id}), Qty: {total_sub_quantity}"
-                    )
+                    log.debug(f"Adding template component (variants disallowed): {sub_part_details['name']} (ID: {sub_part_id}), Qty: {total_sub_quantity}")
                     required_components[root_input_id][sub_part_id] += total_sub_quantity
                 elif is_assembly:
-                    # It's an assembly (could be a template where variants ARE allowed, or a regular assembly)
-                    # Recurse further down the BOM
-                    get_recursive_bom(
-                        api, sub_part_id, total_sub_quantity, required_components, root_input_id, template_only_flags # Pass flags down
-                    )
+                    # Recurse if it's another assembly
+                    get_recursive_bom(api, sub_part_id, total_sub_quantity, required_components, root_input_id, template_only_flags, all_encountered_part_ids) # Pass the set down
                 else:
-                    # It's a non-assembly base component (or a template treated as such because variants allowed)
-                    log.debug(
-                        f"Adding base component: {sub_part_details['name']} (ID: {sub_part_id}), Qty: {total_sub_quantity}"
-                    )
+                    # Add base component requirement
+                    log.debug(f"Adding base component: {sub_part_details['name']} (ID: {sub_part_id}), Qty: {total_sub_quantity}")
                     required_components[root_input_id][sub_part_id] += total_sub_quantity
-        elif bom_items is None:  # BOM fetch failed
-            log.warning(
-                f"Could not process BOM for assembly {part_id} due to fetch error."
-            )
+        elif bom_items is None:
+            log.warning(f"Could not process BOM for assembly {part_id} due to fetch error.")
     else:
-        log.debug(
-            f"Adding base component: {part_details['name']} (ID: {part_id}), Quantity: {quantity}"
-        )
-        required_components[root_input_id][part_id] += quantity # Accumulate under root ID
-
-
-@cache_data(ttl=600)
-def get_final_part_data(_api: InvenTreeAPI, part_ids: Tuple[int, ...]) -> Dict[int, Dict[str, any]]: # Use Tuple/Dict
-    """Fetches final data (name, stock, template status, variant stock) for a tuple of part IDs. Uses tuple for cacheability."""
-    final_data = {}
-    if not part_ids:
-        return final_data
-    # Convert tuple back to list for the API call if needed by the library
-    part_ids_list = list(part_ids)
-
-    log.info(
-        f"Fetching final details (name, stock, template status) for {len(part_ids_list)} base components..."
-    )
-    try:
-        if not _api:
-            log.error("API object is invalid in get_final_part_data.")
-            # Provide default unknown data on error
-            for part_id in part_ids_list:
-                final_data[part_id] = {
-                    "name": f"Unknown (ID: {part_id})",
-                    "in_stock": 0.0,
-                    "is_template": False, # Default on error
-                    "variant_stock": 0.0, # Default on error
-                }
-            return final_data
-
-        # Use list() to potentially evaluate the generator if Part.list returns one
-        # Reason: Use `pk__in` for efficient batch fetching of multiple parts by their primary keys. `list()` evaluates the potential generator.
-        parts_details = list(Part.list(_api, pk__in=part_ids_list))
-        if parts_details:
-            for part in parts_details:
-                stock = part._data.get("in_stock", 0) or 0
-                variant_stock = part._data.get("variant_stock", 0) or 0
-                is_template = part._data.get("is_template", False)
-                final_data[part.pk] = {
-                    "name": part.name,
-                    "in_stock": (
-                        float(stock) if stock is not None else 0.0
-                    ),
-                    "is_template": bool(is_template),
-                    "variant_stock": float(variant_stock),
-                }
-            log.info(f"Successfully fetched batch details for {len(final_data)} parts.")
-            # Check for missed IDs
-            fetched_ids = set(final_data.keys())
-            missed_ids = set(part_ids_list) - fetched_ids
-            if missed_ids:
-                log.warning(
-                    f"Could not fetch batch details for some part IDs: {missed_ids}"
-                )
-                for missed_id in missed_ids:
-                    final_data[missed_id] = {
-                        "name": f"Unknown (ID: {missed_id})",
-                        "in_stock": 0.0,
-                        "is_template": False, # Default for missed
-                        "variant_stock": 0.0, # Default for missed
-                    }
-        else:
-            log.warning("pk__in filter returned no results for final data fetch.")
-            for part_id in part_ids_list:
-                final_data[part_id] = {
-                    "name": f"Unknown (ID: {part_id})",
-                    "in_stock": 0.0,
-                    "is_template": False, # Default on error
-                    "variant_stock": 0.0, # Default on error
-                }
-
-    except Exception as e:
-        log.error(
-            f"Error fetching batch final part data: {e}. Returning defaults.",
-            exc_info=True,
-        )
-        for part_id in part_ids_list:
-            if part_id not in final_data: # Ensure all requested IDs have a default entry if API fails badly
-                final_data[part_id] = {
-                    "name": f"Unknown (ID: {part_id})",
-                    "in_stock": 0.0,
-                    "is_template": False,
-                    "variant_stock": 0.0,
-                }
-            final_data[part_id] = {"name": f"Unknown (ID: {part_id})", "in_stock": 0.0}
-
-    log.info("Finished fetching final part data.")
-    return final_data
+        # It's a base component itself
+        log.debug(f"Adding base component: {part_details['name']} (ID: {part_id}), Quantity: {quantity}")
+        required_components[root_input_id][part_id] += quantity
 
 
 # --- Main Calculation Function ---
 def calculate_required_parts(
     api: InvenTreeAPI,
     target_assemblies: dict[int, float],
-    progress_callback: Optional[Callable[[int, str], None]] = None, # Add progress callback
-) -> List[Dict[str, any]]: # Return type remains List[Dict], but dicts will have more info
+    exclude_supplier_name: Optional[str] = None, # New parameter
+    exclude_manufacturer_name: Optional[str] = None, # New parameter
+    progress_callback: Optional[Callable[[int, str], None]] = None,
+) -> List[Dict[str, any]]:
     """
-    Calculates the list of parts to order based on target assemblies.
-    Returns a list of dictionaries, where each dictionary represents a part to order.
+    Calculates the list of parts to order based on target assemblies,
+    with options to exclude by supplier or manufacturer.
     """
     if not api:
         log.error("Cannot calculate parts: InvenTree API connection is not available.")
-        return []  # Return empty list if API failed
-
+        return []
     if not target_assemblies:
         log.info("No target assemblies provided.")
         return []
 
     log.info(f"Calculating required components for targets: {target_assemblies}")
-    # Changed structure: root_input_id -> {component_id: quantity}
     required_base_components: defaultdict[int, defaultdict[int, float]] = defaultdict(lambda: defaultdict(float))
-    template_only_flags: defaultdict[int, bool] = defaultdict(bool) # Track parts where variants disallowed
+    template_only_flags: defaultdict[int, bool] = defaultdict(bool)
+    all_encountered_part_ids: set[int] = set() # Initialize the set to collect all IDs
 
-    # --- Get Names for Root Input Assemblies (Moved Earlier for Progress Bar) ---
+    # --- Get Names for Root Input Assemblies ---
     root_assembly_ids = tuple(target_assemblies.keys())
-    root_assembly_data = get_final_part_data(api, root_assembly_ids) # Fetch details once
+    # Fetch data including manufacturer and supplier names
+    # Fetch data only for root assemblies initially, full data fetch moved after recursion
+    root_assembly_data = get_final_part_data(api, root_assembly_ids)
 
     # --- Perform Recursive BOM Calculation ---
-    num_targets = len(target_assemblies) # Get total number of assemblies
-    # Use enumerate to track progress
+    num_targets = len(target_assemblies)
     for index, (part_id, quantity) in enumerate(target_assemblies.items()):
         log.info(f"Processing target assembly ID: {part_id}, Quantity: {quantity}")
-        # --- Detailed Progress Update ---
         if progress_callback and num_targets > 0:
-            # Scale progress for this section (e.g., 10% to 40%)
             current_progress = 10 + int(((index + 1) / num_targets) * 30)
-            # Get assembly name from pre-fetched data
             part_name = root_assembly_data.get(part_id, {}).get("name", f"ID {part_id}")
             progress_text = f"Calculating BOM for '{part_name}' ({index + 1}/{num_targets})"
             progress_callback(current_progress, progress_text)
-        # --- End Progress Update ---
-
         try:
-            # Pass only valid IDs (int) and quantities (float)
-            # Pass the target assembly's part_id as the root_input_id
-            get_recursive_bom(
-                api, int(part_id), float(quantity), required_base_components, int(part_id), template_only_flags # Pass flags dict
-            )
+            # Pass the new set to the recursive function
+            get_recursive_bom(api, int(part_id), float(quantity), required_base_components, int(part_id), template_only_flags, all_encountered_part_ids)
         except ValueError:
             log.error(f"Invalid ID ({part_id}) or Quantity ({quantity}). Skipping.")
             continue
         except Exception as e:
             log.error(f"Error processing assembly {part_id}: {e}", exc_info=True)
-            # Decide if you want to stop or continue processing others
-            continue  # Continue with the next assembly
+            continue
 
-    log.info(f"Total unique base components required: {len(required_base_components)}")
-    if not required_base_components:
-        log.info("No base components found. Nothing to order.")
-        return []
-
-    # --- Get Final Data (Names & Stock) ---
-    if progress_callback:
-        progress_callback(40, "Fetching part details...")
-    # --- Get Final Data (Names & Stock) for ALL unique components across all groups ---
-    all_unique_component_ids = set()
-    for root_id, components in required_base_components.items():
-        all_unique_component_ids.update(components.keys())
-
-    if not all_unique_component_ids:
-        log.info("No base components found. Nothing to order.")
-        return []
-
-    log.info(f"Total unique base components required across all groups: {len(all_unique_component_ids)}")
-    # Pass as tuple for cache key compatibility
-    final_part_data = get_final_part_data(api, tuple(all_unique_component_ids))
-
-    # --- Calculate Order List ---
-    # (Fetching root assembly data moved before the BOM calculation loop)
-    # --- Calculate TOTAL required quantity for each unique part across all assemblies ---
+    # --- Consolidate Base Components ---
+    # Calculate total required quantity for each unique BASE part across all root assemblies
     total_required_quantities = defaultdict(float)
-    for root_id, components in required_base_components.items():
+    for components in required_base_components.values():
         for part_id, qty in components.items():
             total_required_quantities[part_id] += qty
 
-    # --- Calculate GLOBAL order need for each unique part ---
-    if progress_callback:
-        progress_callback(60, "Calculating order amounts...")
+    log.info(f"Total unique base components required: {len(total_required_quantities)}")
+    if not total_required_quantities:
+        log.info("No base components found after BOM processing. Nothing to order.")
+        return []
+
+    # --- Get Final Data for ALL Encountered Parts ---
+    if progress_callback: progress_callback(40, "Fetching details for all BOM parts...")
+    # Add root assembly IDs to the set as well, in case they are needed directly
+    all_encountered_part_ids.update(root_assembly_ids)
+    if not all_encountered_part_ids:
+         log.warning("No parts encountered during BOM traversal. This is unexpected.")
+         return []
+    log.info(f"Total unique parts encountered in BOMs (incl. assemblies): {len(all_encountered_part_ids)}")
+    # Fetch data for ALL parts found during recursion
+    final_part_data = get_final_part_data(api, tuple(all_encountered_part_ids))
+    # Note: root_assembly_data is now a subset of final_part_data, can potentially remove its separate fetch later if not needed before recursion.
+
+    # --- Calculate GLOBAL order need (using BASE components only) ---
+    # This part remains the same, iterating over the base components that need ordering
+
+    # --- Calculate GLOBAL order need ---
+    if progress_callback: progress_callback(60, "Calculating order amounts...")
     global_parts_to_order_amount = {}
-    part_available_stock = {} # Store calculated available stock for display
+    part_available_stock = {}
     log.info("Calculating global order quantities and available stock...")
     for part_id, total_required in total_required_quantities.items():
         part_data = final_part_data.get(part_id)
         if not part_data:
             log.warning(f"Missing final data for Part ID {part_id} during global calculation. Assuming 0 stock.")
-            in_stock = 0.0
-            is_template = False
-            variant_stock = 0.0
+            in_stock, is_template, variant_stock = 0.0, False, 0.0
         else:
             in_stock = part_data.get("in_stock", 0.0)
             is_template = part_data.get("is_template", False)
             variant_stock = part_data.get("variant_stock", 0.0)
 
         template_only = template_only_flags.get(part_id, False)
+        if template_only: total_available_stock = in_stock
+        elif is_template: total_available_stock = in_stock + variant_stock
+        else: total_available_stock = in_stock
+        log.debug(f"Part {part_id} ({part_data.get('name', 'N/A') if part_data else 'N/A'}) - Available Stock: {total_available_stock} (Template Only: {template_only}, Is Template: {is_template})")
 
-        # Determine available stock based on template status and flags
-        if template_only:
-            # Variants were disallowed somewhere in the BOM for this template part
-            total_available_stock = in_stock
-            log.debug(f"Part {part_id} ({part_data.get('name', 'N/A') if part_data else 'N/A'}) - Template Only Stock: {total_available_stock}")
-        elif is_template:
-            # Template part, variants allowed
-            total_available_stock = in_stock + variant_stock
-            log.debug(f"Part {part_id} ({part_data.get('name', 'N/A') if part_data else 'N/A'}) - Template + Variant Stock: {total_available_stock}")
-        else:
-            # Regular part
-            total_available_stock = in_stock
-            log.debug(f"Part {part_id} ({part_data.get('name', 'N/A') if part_data else 'N/A'}) - Regular Stock: {total_available_stock}")
-
-
-        # Store the calculated available stock for later display
         part_available_stock[part_id] = total_available_stock
-
         global_to_order = total_required - total_available_stock
-        # Reason: Use tolerance for float comparison
-        if global_to_order > 0.001:
-            global_parts_to_order_amount[part_id] = round(global_to_order, 3)
-        else:
-             global_parts_to_order_amount[part_id] = 0.0 # Store 0 if no global order needed
+        global_parts_to_order_amount[part_id] = round(global_to_order, 3) if global_to_order > 0.001 else 0.0
 
-    # --- Collect all root assembly names where each globally needed part is used ---
+    # --- Collect root assembly names for needed parts ---
     part_to_root_assemblies = defaultdict(set)
-    for root_id, components in required_base_components.items():
-        root_assembly_name = root_assembly_data.get(root_id, {}).get("name", f"Unknown Assembly (ID: {root_id})")
-        for part_id in components.keys():
-            # Check if part needs global ordering before adding its assembly name
-            if global_parts_to_order_amount.get(part_id, 0.0) > 0:
+    for root_id, base_components in required_base_components.items():
+        # Use the comprehensive final_part_data to get root assembly names
+        root_assembly_name = final_part_data.get(root_id, {}).get("name", f"Unknown Assembly (ID: {root_id})")
+        for part_id in base_components.keys(): # Iterate over base components for this root
+            if global_parts_to_order_amount.get(part_id, 0.0) > 0: # Check if this base part needs ordering
                  part_to_root_assemblies[part_id].add(root_assembly_name)
 
-    # --- Build the final FLAT list for display ---
+    # --- Build the final FLAT list ---
     final_flat_parts_list = []
     log.info("Building final flat list with assembly context...")
+    PO_STATUS_MAP = {10: "Pending", 20: "In Progress", 30: "Complete", 40: "Cancelled", 50: "Lost", 60: "Returned", 70: "On Hold"}
 
-    # Purchase order status code to label mapping
-    PO_STATUS_MAP = {
-        10: "Pending",
-        20: "In Progress",
-        30: "Complete",
-        40: "Cancelled",
-        50: "Lost",
-        60: "Returned",
-        70: "On Hold",
-    }
+    # --- Pre-fetch Purchase Order Data (Optimized v2) ---
+    unique_order_ids_to_fetch = set()
+    part_po_line_data = defaultdict(list) # Store {part_id: [{'quantity': qty, 'order_id': oid}, ...]}
+    fetched_po_details = {} # Store {order_id: {'ref': ref, 'status_code': code, 'status_label': label}}
+    all_supplier_part_pks = [] # Store all relevant SupplierPart PKs
+    CHUNK_SIZE = 100 # Define chunk size for PO fetching as well
 
-    # Iterate through the parts that need global ordering
+    if IMPORTS_AVAILABLE:
+        po_fetch_progress_step = 80
+        if progress_callback: progress_callback(po_fetch_progress_step, "Fetching supplier parts...")
+        try:
+            parts_needing_order_ids = [pid for pid, amount in global_parts_to_order_amount.items() if amount > 0]
+            if parts_needing_order_ids:
+                log.info(f"Optimized PO Fetch: Fetching SupplierParts for {len(parts_needing_order_ids)} parts...")
+                # Attempt batch fetch for SupplierParts using part__in
+                try:
+                    # Fetch 'part' field too, to map back SP pk to original Part pk
+                    supplier_parts_list = SupplierPart.list(api, part__in=parts_needing_order_ids, fields=['pk', 'part'])
+                    all_supplier_part_pks = [sp.pk for sp in supplier_parts_list]
+                    # Create a map from supplier_part pk back to the original part pk
+                    sp_pk_to_part_id = {sp.pk: sp._data.get('part') for sp in supplier_parts_list}
+                    log.info(f"Fetched {len(supplier_parts_list)} supplier parts via batch.")
+                except Exception as batch_sp_err:
+                    log.warning(f"Batch fetch for SupplierParts failed ({batch_sp_err}). Individual fetch might be slow.")
+                    # Fallback or error handling if batch fails - for now, we'll proceed, PO info might be incomplete
+                    all_supplier_part_pks = []
+                    sp_pk_to_part_id = {}
+
+
+                # Fetch all relevant PO Lines in one batch using collected SupplierPart PKs
+                if all_supplier_part_pks:
+                    log.info(f"Optimized PO Fetch: Fetching PO Lines for {len(all_supplier_part_pks)} SupplierParts...")
+                    if progress_callback: progress_callback(po_fetch_progress_step + 5, "Fetching purchase order lines...")
+                    all_po_lines = []
+                    try:
+                        # Fetch PO lines in chunks
+                        for sp_pk_chunk in _chunk_list(all_supplier_part_pks, CHUNK_SIZE):
+                             log.debug(f"Fetching PO lines for chunk of {len(sp_pk_chunk)} SupplierPart PKs...")
+                             chunk_po_lines = PurchaseOrderLineItem.list(api, supplier_part__in=sp_pk_chunk, fields=['order', 'quantity', 'supplier_part'])
+                             if chunk_po_lines:
+                                 all_po_lines.extend(chunk_po_lines)
+                        log.info(f"Fetched a total of {len(all_po_lines)} PO lines across all chunks.")
+
+                        # Process the fetched lines
+                        for line in all_po_lines:
+                            order_id = line._data.get('order')
+                            supplier_part_pk = line._data.get('supplier_part')
+                            part_id = sp_pk_to_part_id.get(supplier_part_pk) # Find original part_id
+
+                            if order_id and part_id:
+                                unique_order_ids_to_fetch.add(order_id)
+                                part_po_line_data[part_id].append({'quantity': line.quantity, 'order_id': order_id})
+                    except Exception as chunked_line_err:
+                         log.error(f"Error during chunked PO line fetch: {chunked_line_err}", exc_info=True)
+                         # Clear data as it might be incomplete
+                         unique_order_ids_to_fetch.clear()
+                         part_po_line_data.clear()
+
+        except Exception as e:
+            log.error(f"Error during initial supplier part fetch for POs: {e}", exc_info=True)
+            # Clear data as it might be incomplete
+            unique_order_ids_to_fetch.clear()
+            part_po_line_data.clear()
+
+        # Fetch details for unique POs
+        if unique_order_ids_to_fetch:
+            log.info(f"Fetching details for {len(unique_order_ids_to_fetch)} unique Purchase Orders...")
+            if progress_callback: progress_callback(90, f"Fetching {len(unique_order_ids_to_fetch)} PO details...")
+            order_ids_list = list(unique_order_ids_to_fetch)
+            try:
+                 # Fetch PO details in chunks
+                 for order_id_chunk in _chunk_list(order_ids_list, CHUNK_SIZE):
+                     log.debug(f"Fetching PO details for chunk of {len(order_id_chunk)} Order PKs...")
+                     chunk_orders = PurchaseOrder.list(api, pk__in=order_id_chunk, fields=['pk', 'reference', 'status'])
+                     if chunk_orders:
+                         for order in chunk_orders:
+                             status_code = order._data.get('status')
+                             # Only store details for relevant statuses
+                             if status_code in [10, 20]: # Pending or In Progress
+                                 fetched_po_details[order.pk] = {
+                                     'ref': order._data.get('reference', 'No Ref'),
+                                     'status_code': status_code,
+                                     'status_label': PO_STATUS_MAP.get(status_code, f"Unknown ({status_code})")
+                                 }
+                 log.info(f"Fetched details for {len(fetched_po_details)} relevant POs across all chunks.")
+            except Exception as e:
+                 log.error(f"Error during chunked PO detail fetch: {e}. PO info might be incomplete.", exc_info=True)
+                 # Individual fallback is removed to avoid potential hangs if batch fails massively
+
+    # --- Assemble Final List using pre-fetched data ---
+    if progress_callback: progress_callback(98, "Assembling final list...")
     for part_id, global_to_order in global_parts_to_order_amount.items():
-         if global_to_order > 0: # Only include parts that actually need ordering
+         if global_to_order > 0:
+            # Use the comprehensive final_part_data here as well
             part_data = final_part_data.get(part_id)
             if not part_data:
-                log.error(f"Data inconsistency: Missing final data for globally needed Part ID {part_id}.")
-                part_name = f"Error - Missing Data (ID: {part_id})"
-                in_stock = 0.0
-                # Attempt to get total required even if final data is missing
-                total_required = total_required_quantities.get(part_id, 0.0)
+                # This log might indicate an issue if a base component wasn't fetched
+                log.error(f"Data inconsistency: Missing final data for required base component ID {part_id}.")
+                part_name, total_required, manufacturer_name, supplier_names = f"Error (ID: {part_id})", 0.0, None, []
             else:
-                part_name = part_data.get("name", f"Unknown Component (ID: {part_id})")
-                # in_stock = part_data.get("in_stock", 0.0) # We'll use the calculated available stock instead
-                total_required = total_required_quantities[part_id] # Already calculated
+                part_name = part_data.get("name", f"Unknown (ID: {part_id})")
+                total_required = total_required_quantities[part_id] # Still use the calculated total for base part
+                manufacturer_name = part_data.get("manufacturer_name")
+                supplier_names = part_data.get("supplier_names", []) # Get supplier names from the comprehensive data
 
-            # Get the sorted list of assembly names for this part
-            used_in_assemblies_list = sorted(list(part_to_root_assemblies.get(part_id, set())))
-            used_in_assemblies_str = ", ".join(used_in_assemblies_list)
+            used_in_assemblies_str = ", ".join(sorted(list(part_to_root_assemblies.get(part_id, set()))))
 
-            # --- Fetch purchase order info ---
-            if progress_callback:
-                # Update progress more granularly if needed, here just once before the loop
-                progress_callback(80, f"Checking purchase orders for {part_name}...")
+            # Build purchase_orders_info using pre-fetched details
             purchase_orders_info = []
-            try:
-                from inventree.company import SupplierPart
-                supplier_parts = SupplierPart.list(api, part=part_id)
-                for sp in supplier_parts:
-                    try:
-                        from inventree.purchase_order import PurchaseOrderLineItem, PurchaseOrder
-                        po_lines = PurchaseOrderLineItem.list(api, part=sp.pk)
-                        for line in po_lines:
-                            order_id = line._data.get('order')
-                            try:
-                                order = PurchaseOrder(api, pk=order_id)
-                                ref = order._data.get('reference', 'No Ref')
-                                status_code = order._data.get('status', 'Unknown')
-                                # Convert status code to label if possible
-                                status_label = PO_STATUS_MAP.get(status_code, str(status_code))
-                                # Only include if status is Pending or In Progress
-                                if status_label in ("Pending", "In Progress"):
-                                    # Extract quantity from the line item
-                                    quantity = line._data.get('quantity', 0)
-                                    purchase_orders_info.append({
-                                        "ref": ref,
-                                        "status": status_label,
-                                        "quantity": quantity # Add quantity
-                                    })
-                            except Exception:
-                                continue
-                    except Exception:
-                        continue
-            except Exception:
-                purchase_orders_info = []
+            if part_id in part_po_line_data:
+                for line_data in part_po_line_data[part_id]:
+                    order_id = line_data['order_id']
+                    if order_id in fetched_po_details: # Check if PO details were fetched and relevant
+                        po_detail = fetched_po_details[order_id]
+                        purchase_orders_info.append({
+                            "ref": po_detail['ref'],
+                            "quantity": line_data['quantity'],
+                            "status": po_detail['status_label']
+                        })
 
-            final_flat_parts_list.append(
-                {
-                    "pk": part_id,
-                    "name": part_name,
-                    "total_required": round(total_required, 3), # Total needed across all inputs
-                    # Use the calculated total_available_stock for display consistency
-                    "available_stock": round(part_available_stock.get(part_id, 0.0), 3),
-                    "to_order": global_to_order, # Global amount to order
-                    "used_in_assemblies": used_in_assemblies_str, # New field
-                    "purchase_orders": purchase_orders_info, # New field with PO info
-                }
-            )
-    # Final progress update
-    if progress_callback:
-        progress_callback(100, "Finalizing...")
-    # Sort the final flat list by part name
+            # Append data for this part
+            final_flat_parts_list.append({
+                "pk": part_id,
+                "name": part_name,
+                "total_required": round(total_required, 3),
+                "available_stock": round(part_available_stock.get(part_id, 0.0), 3),
+                "to_order": round(global_to_order, 3),
+                "used_in_assemblies": used_in_assemblies_str,
+                "purchase_orders": purchase_orders_info,
+                "manufacturer_name": manufacturer_name,
+                "supplier_names": supplier_names,
+            })
+    # End of loop
+
+    # --- Filtering based on Supplier and Manufacturer ---
+    filtered_list = final_flat_parts_list
+    original_count = len(filtered_list)
+    parts_removed_count = 0
+
+    # Filter by Supplier
+    if exclude_supplier_name:
+        supplier_to_exclude_lower = exclude_supplier_name.strip().lower()
+        log.info(f"Filtering out parts from supplier: '{exclude_supplier_name}'")
+        # Add detailed logging before filtering
+        temp_filtered_list = []
+        for part in filtered_list:
+            part_id_for_log = part.get("pk")
+            supplier_names_for_log = part.get("supplier_names", [])
+            suppliers_lower_for_log = [s.lower() for s in supplier_names_for_log]
+            # Log details specifically for part 1516 or any part being filtered
+            if part_id_for_log == 1516:
+                 log.info(f"Checking Part ID {part_id_for_log}: Suppliers = {supplier_names_for_log}, Lowercase = {suppliers_lower_for_log}. Comparing against '{supplier_to_exclude_lower}'.")
+
+            # Apply the filter condition
+            if supplier_to_exclude_lower not in suppliers_lower_for_log:
+                temp_filtered_list.append(part)
+            elif part_id_for_log == 1516: # Log if 1516 is being excluded
+                 log.info(f"Excluding Part ID {part_id_for_log} because '{supplier_to_exclude_lower}' was found in {suppliers_lower_for_log}.")
+
+        filtered_list = temp_filtered_list
+        # Log the state *after* supplier filtering is complete
+        supplier_filtered_ids = [p.get('pk') for p in filtered_list]
+        log.info(f"After supplier filter. Remaining IDs ({len(supplier_filtered_ids)}): {supplier_filtered_ids}")
+        if 1516 not in supplier_filtered_ids and exclude_supplier_name and exclude_supplier_name.strip().lower() == "haip solutions gmbh":
+             log.info("Confirmed: Part 1516 is NOT in the list after supplier filter.")
+        elif 1516 in supplier_filtered_ids and exclude_supplier_name and exclude_supplier_name.strip().lower() == "haip solutions gmbh":
+             log.warning("Inconsistency: Part 1516 IS STILL in the list after supplier filter, despite logs indicating exclusion.")
+
+        parts_removed_supplier = original_count - len(filtered_list)
+        if parts_removed_supplier > 0:
+            log.info(f"Removed {parts_removed_supplier} parts based on supplier filter.")
+            parts_removed_count += parts_removed_supplier
+
+    # Filter by Manufacturer (on the already potentially filtered list)
+    if exclude_manufacturer_name:
+        manufacturer_to_exclude_lower = exclude_manufacturer_name.strip().lower()
+        log.info(f"Filtering out parts from manufacturer: '{exclude_manufacturer_name}'")
+        current_count_before_mfg = len(filtered_list)
+        filtered_list = [
+            part for part in filtered_list
+            if str(part.get("manufacturer_name", "")).strip().lower() != manufacturer_to_exclude_lower
+        ]
+        parts_removed_manufacturer = current_count_before_mfg - len(filtered_list)
+        if parts_removed_manufacturer > 0:
+             log.info(f"Removed {parts_removed_manufacturer} parts based on manufacturer filter.")
+             parts_removed_count += parts_removed_manufacturer
+
+    if parts_removed_count > 0:
+         log.info(f"Total parts removed by filters: {parts_removed_count}. Final list size: {len(filtered_list)}")
+
+    final_flat_parts_list = filtered_list # Assign the potentially manufacturer-filtered list
+
+    # Log the final list before returning
+    final_ids = [p.get('pk') for p in final_flat_parts_list]
+    log.info(f"Final list being returned by calculate_required_parts. IDs ({len(final_ids)}): {final_ids}")
+    if 1516 not in final_ids and exclude_supplier_name and exclude_supplier_name.strip().lower() == "haip solutions gmbh":
+        log.info("Confirmed: Part 1516 is NOT in the final returned list.")
+    elif 1516 in final_ids and exclude_supplier_name and exclude_supplier_name.strip().lower() == "haip solutions gmbh":
+        log.warning("Inconsistency: Part 1516 IS in the final returned list!")
+
+    # --- Final Sorting ---
     final_flat_parts_list.sort(key=lambda x: x["name"])
 
-    log.info(f"Calculation finished. Parts to order: {len(final_flat_parts_list)}")
+    # --- Final Progress Update & Return ---
+    if progress_callback:
+        progress_callback(100, "Calculation complete!")
+
+    log.info(f"Calculation finished. Returning {len(final_flat_parts_list)} parts to order.")
     return final_flat_parts_list
-
-
-# (Die Funktion save_results_to_markdown kann hier bleiben oder in die Streamlit App verschoben werden,
-#  wenn du einen Download-Button möchtest)
