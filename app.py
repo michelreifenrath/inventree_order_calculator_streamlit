@@ -70,14 +70,14 @@ if api is None:
     st.stop()
 else:
     st.success(f"✅ Erfolgreich verbunden mit InvenTree API Version: {api.api_version}")
-    
+
     # --- Teile aus Zielkategorie laden ---
     category_parts = get_parts_in_category(api, TARGET_CATEGORY_ID)
     part_name_to_id = {}
     part_id_to_name = {}
     part_names = []
     default_part_id = None
-    
+
     if category_parts is None:
         st.error(f"💥 Fehler beim Laden der Teile aus Kategorie {TARGET_CATEGORY_ID}. API-Problem?")
         st.stop()
@@ -90,7 +90,7 @@ else:
         part_names = list(part_name_to_id.keys()) # Already sorted by logic function
         default_part_id = category_parts[0]['pk'] # Use the first part as default
         log.info(f"Successfully loaded {len(part_names)} parts from category {TARGET_CATEGORY_ID}.")
-    
+
 # --- Initialisierung des Session State für Eingaben ---
 # Wird verwendet, um Benutzereingaben über Re-Runs hinweg zu speichern
 # Initialisiere Session State nur, wenn er leer ist ODER wenn keine Teile geladen werden konnten (um Fehler zu vermeiden)
@@ -308,71 +308,96 @@ if st.session_state.results is not None: # Ensure this is at the correct base in
         # --- Flat List Display ---
         df_full = pd.DataFrame(results_list)
 
-        # Create a summary string for purchase orders
-        df_full["Bestellungen"] = df_full.get("purchase_orders", []).apply(
-            # Update f-string to include quantity
-            lambda po_list: ", ".join([f"{po.get('ref', '')} ({po.get('quantity', 0)} Stk, Status: {po.get('status', '')})" for po in po_list]) if po_list else "Keine"
-        )
+        # Defensive check: Ensure DataFrame is not empty and has required columns
+        required_cols = {"pk", "name", "total_required", "available_stock", "to_order", "used_in_assemblies", "purchase_orders"}
+        if df_full.empty or not required_cols.issubset(df_full.columns):
+            st.error("Interner Fehler: Berechnungsdaten sind ungültig oder unvollständig.")
+            log.error(f"Invalid DataFrame created from results_list. Columns: {df_full.columns}. Missing: {required_cols - set(df_full.columns)}")
+            # Optionally clear results or stop further processing
+            st.session_state.results = None # Clear potentially bad results
+        else: # This else corresponds to the defensive check
+            # All the following code needs to be indented one level deeper
+            # Proceed with DataFrame manipulation only if valid
 
-        # Select and rename columns for display
-        df_display = df_full[[
-            "pk",
-            "name",
-            "total_required", # Use the total required quantity
-            "in_stock",
-            "to_order", # This is the global amount
-            "used_in_assemblies", # Existing column
-            "Bestellungen", # New column with PO info
-        ]]
-        df_display.columns = [
-            "Part ID",
-            "Name",
-            "Gesamt benötigt", # Updated name
-            "Auf Lager", # Removed (Global)
-            "Zu bestellen", # Removed (Global)
-            "Verwendet in Assemblies", # Existing column
-            "Bestellungen", # New column name
-        ]
-        st.data_editor(
-            df_display,
-            column_config={
-                "Name": st.column_config.TextColumn(width="large"),
-                "Bestellungen": st.column_config.TextColumn(width="large"),
-            },
-            use_container_width=True,
-            hide_index=True,
-            disabled=True
-        )
+            # Create a summary string for purchase orders
+            df_full["Bestellungen"] = df_full.get("purchase_orders", []).apply(
+                # Update f-string to include quantity
+                lambda po_list: ", ".join([f"{po.get('ref', '')} ({po.get('quantity', 0)} Stk, Status: {po.get('status', '')})" for po in po_list]) if po_list else "Keine"
+            )
 
-        # --- CSV Download (using the same flat structure) ---
-        # df_full is already created above
-        # Reorder columns for CSV clarity
-        df_csv = df_full[[
-            "pk",
-            "name",
-            "total_required",
-            "in_stock",
-            "to_order",
-            "used_in_assemblies",
-            "Bestellungen",
-        ]]
-        # Use the same column names as the display table for consistency
-        df_csv.columns = [
-            "Part ID",
-            "Name",
-            "Gesamt benötigt",
-            "Auf Lager", # Removed (Global)
-            "Zu bestellen", # Removed (Global)
-            "Verwendet in Assemblies",
-            "Bestellungen",
-        ]
-        csv_data = df_csv.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="💾 Ergebnisse als CSV herunterladen", # Simpler label now
-            data=csv_data,
-            file_name="inventree_order_list.csv", # Revert filename
-            mime="text/csv",
-        )
+            # Create URL column for linking
+            base_url = "https://lager.haip.solutions/"
+            # Corrected: Use 'pk' column which exists in df_full
+            df_full['Part URL'] = df_full['pk'].apply(lambda pk: f"{base_url}platform/part/{pk}/") # Use new path structure
+
+            # Select columns for display (including Name and the hidden URL)
+            df_display = df_full[[
+                "name", # Keep original name column
+                "Part URL", # Add URL column (will be hidden)
+                "total_required",
+                "available_stock",
+                "to_order",
+                "used_in_assemblies",
+                "Bestellungen",
+            ]]
+            # Update column headers (Part URL won't be shown)
+            df_display.columns = [
+                "Name",
+                "Part ID", # Change header for the URL column
+                "Gesamt benötigt", # Updated name
+                "Verfügbar", # Changed from "Auf Lager"
+                "Zu bestellen", # Removed (Global)
+                "Verwendet in Assemblies", # Existing column
+                "Bestellungen", # New column name
+            ]
+            st.data_editor(
+                df_display,
+                column_config={
+                     "Name": st.column_config.TextColumn(width="large"), # Keep Name as Text
+                     "Part ID": st.column_config.LinkColumn( # Apply LinkColumn to the URL column
+                        # Use regex to display only the part ID number from the new URL structure
+                        display_text=r"https://lager.haip.solutions/platform/part/(\d+)/",
+                        validate=r"^https://lager.haip.solutions/platform/part/\d+/$", # Validate new URL format
+                        help="Klicken, um das Teil in InvenTree zu öffnen",
+                        width="small"
+                     ),
+                     "Bestellungen": st.column_config.TextColumn(width="large"),
+                },
+                use_container_width=True,
+                hide_index=True,
+                # disabled=True # Re-enable disabled=True if needed, but links won't work
+            )
+
+            # --- CSV Download (using the same flat structure) ---
+            # df_full is guaranteed to be valid here
+            # Reorder columns for CSV clarity
+            df_csv = df_full[[
+                "pk",
+                "name",
+                "total_required",
+                "available_stock", # Changed from in_stock
+                "to_order",
+                "used_in_assemblies",
+                "Bestellungen",
+            ]]
+            # Use the same column names as the display table for consistency
+            df_csv.columns = [
+                "Part ID",
+                "Name",
+                "Gesamt benötigt",
+                "Verfügbar", # Changed from "Auf Lager"
+                "Zu bestellen", # Removed (Global)
+                "Verwendet in Assemblies",
+                "Bestellungen",
+            ]
+            csv_data = df_csv.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="💾 Ergebnisse als CSV herunterladen", # Simpler label now
+                data=csv_data,
+                file_name="inventree_order_list.csv", # Revert filename
+                mime="text/csv",
+            )
+        # End of the 'else' block for valid DataFrame
 
         # Optional: Markdown-Ausgabe (wie im Original-Skript)
         # Hier könntest du die save_results_to_markdown Funktion importieren und nutzen

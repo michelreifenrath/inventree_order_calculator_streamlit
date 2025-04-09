@@ -52,7 +52,9 @@ def get_part_details(_api: InvenTreeAPI, part_id: int) -> Optional[Dict[str, any
             "name": part.name,
             "in_stock": float(
                 part._data.get("in_stock", 0) or 0
-            ),  # Reason: Ensure float type. `get` returns 0 if key missing. `or 0` handles potential None value if key exists but is null.
+            ),
+            "is_template": bool(part._data.get("is_template", False)),
+            "variant_stock": float(part._data.get("variant_stock", 0) or 0),
         }
         return details
     except Exception as e:
@@ -78,7 +80,11 @@ def get_bom_items(_api: InvenTreeAPI, part_id: int) -> Optional[List[Dict[str, a
         bom_items_raw = part.getBomItems()
         if bom_items_raw:
             bom_data = [
-                {"sub_part": item.sub_part, "quantity": float(item.quantity)}
+                {
+                    "sub_part": item.sub_part,
+                    "quantity": float(item.quantity),
+                    "allow_variants": bool(getattr(item, "allow_variants", True)),
+                }
                 for item in bom_items_raw
             ]
             return bom_data
@@ -143,8 +149,9 @@ def get_recursive_bom(
     api: InvenTreeAPI,
     part_id: int,
     quantity: float,
-    required_components: defaultdict[int, defaultdict[int, float]], # Changed structure
-    root_input_id: int, # Added root ID
+    required_components: defaultdict[int, defaultdict[int, float]],
+    root_input_id: int,
+    template_only_flags: defaultdict[int, bool], # Track parts where variants are disallowed
 ):
     """
     Recursively processes the BOM using cached data fetching functions.
@@ -167,10 +174,40 @@ def get_recursive_bom(
             for item in bom_items:
                 sub_part_id = item["sub_part"]
                 sub_quantity_per = item["quantity"]
+                allow_variants = item["allow_variants"] # Get flag from updated get_bom_items
                 total_sub_quantity = quantity * sub_quantity_per
-                get_recursive_bom(
-                    api, sub_part_id, total_sub_quantity, required_components, root_input_id # Pass root ID
-                )
+
+                # Fetch sub-part details to check if it's a template
+                sub_part_details = get_part_details(api, sub_part_id)
+                if not sub_part_details:
+                    log.warning(f"Skipping sub-part ID {sub_part_id} in BOM for {part_id} due to fetch error.")
+                    continue
+
+                is_template = sub_part_details.get("is_template", False)
+                is_assembly = sub_part_details.get("assembly", False)
+
+                # --- Variant Handling Logic ---
+                if is_template and not allow_variants:
+                    # Template part, but variants NOT allowed for this specific BOM line.
+                    # Mark this part ID as needing "template only" stock check later.
+                    template_only_flags[sub_part_id] = True
+                    # Add requirement for the template part itself (it's a base component in this context)
+                    log.debug(
+                        f"Adding template component (variants disallowed): {sub_part_details['name']} (ID: {sub_part_id}), Qty: {total_sub_quantity}"
+                    )
+                    required_components[root_input_id][sub_part_id] += total_sub_quantity
+                elif is_assembly:
+                    # It's an assembly (could be a template where variants ARE allowed, or a regular assembly)
+                    # Recurse further down the BOM
+                    get_recursive_bom(
+                        api, sub_part_id, total_sub_quantity, required_components, root_input_id, template_only_flags # Pass flags down
+                    )
+                else:
+                    # It's a non-assembly base component (or a template treated as such because variants allowed)
+                    log.debug(
+                        f"Adding base component: {sub_part_details['name']} (ID: {sub_part_id}), Qty: {total_sub_quantity}"
+                    )
+                    required_components[root_input_id][sub_part_id] += total_sub_quantity
         elif bom_items is None:  # BOM fetch failed
             log.warning(
                 f"Could not process BOM for assembly {part_id} due to fetch error."
@@ -184,7 +221,7 @@ def get_recursive_bom(
 
 @cache_data(ttl=600)
 def get_final_part_data(_api: InvenTreeAPI, part_ids: Tuple[int, ...]) -> Dict[int, Dict[str, any]]: # Use Tuple/Dict
-    """Fetches final data (name, stock) for a tuple of part IDs. Uses tuple for cacheability."""
+    """Fetches final data (name, stock, template status, variant stock) for a tuple of part IDs. Uses tuple for cacheability."""
     final_data = {}
     if not part_ids:
         return final_data
@@ -192,7 +229,7 @@ def get_final_part_data(_api: InvenTreeAPI, part_ids: Tuple[int, ...]) -> Dict[i
     part_ids_list = list(part_ids)
 
     log.info(
-        f"Fetching final details (name, stock) for {len(part_ids_list)} base components..."
+        f"Fetching final details (name, stock, template status) for {len(part_ids_list)} base components..."
     )
     try:
         if not _api:
@@ -202,6 +239,8 @@ def get_final_part_data(_api: InvenTreeAPI, part_ids: Tuple[int, ...]) -> Dict[i
                 final_data[part_id] = {
                     "name": f"Unknown (ID: {part_id})",
                     "in_stock": 0.0,
+                    "is_template": False, # Default on error
+                    "variant_stock": 0.0, # Default on error
                 }
             return final_data
 
@@ -210,12 +249,16 @@ def get_final_part_data(_api: InvenTreeAPI, part_ids: Tuple[int, ...]) -> Dict[i
         parts_details = list(Part.list(_api, pk__in=part_ids_list))
         if parts_details:
             for part in parts_details:
-                stock = part._data.get("in_stock", 0)
+                stock = part._data.get("in_stock", 0) or 0
+                variant_stock = part._data.get("variant_stock", 0) or 0
+                is_template = part._data.get("is_template", False)
                 final_data[part.pk] = {
                     "name": part.name,
                     "in_stock": (
                         float(stock) if stock is not None else 0.0
-                    ),  # Reason: Ensure float type and handle potential None value for stock.
+                    ),
+                    "is_template": bool(is_template),
+                    "variant_stock": float(variant_stock),
                 }
             log.info(f"Successfully fetched batch details for {len(final_data)} parts.")
             # Check for missed IDs
@@ -229,6 +272,8 @@ def get_final_part_data(_api: InvenTreeAPI, part_ids: Tuple[int, ...]) -> Dict[i
                     final_data[missed_id] = {
                         "name": f"Unknown (ID: {missed_id})",
                         "in_stock": 0.0,
+                        "is_template": False, # Default for missed
+                        "variant_stock": 0.0, # Default for missed
                     }
         else:
             log.warning("pk__in filter returned no results for final data fetch.")
@@ -236,6 +281,8 @@ def get_final_part_data(_api: InvenTreeAPI, part_ids: Tuple[int, ...]) -> Dict[i
                 final_data[part_id] = {
                     "name": f"Unknown (ID: {part_id})",
                     "in_stock": 0.0,
+                    "is_template": False, # Default on error
+                    "variant_stock": 0.0, # Default on error
                 }
 
     except Exception as e:
@@ -244,6 +291,13 @@ def get_final_part_data(_api: InvenTreeAPI, part_ids: Tuple[int, ...]) -> Dict[i
             exc_info=True,
         )
         for part_id in part_ids_list:
+            if part_id not in final_data: # Ensure all requested IDs have a default entry if API fails badly
+                final_data[part_id] = {
+                    "name": f"Unknown (ID: {part_id})",
+                    "in_stock": 0.0,
+                    "is_template": False,
+                    "variant_stock": 0.0,
+                }
             final_data[part_id] = {"name": f"Unknown (ID: {part_id})", "in_stock": 0.0}
 
     log.info("Finished fetching final part data.")
@@ -271,6 +325,7 @@ def calculate_required_parts(
     log.info(f"Calculating required components for targets: {target_assemblies}")
     # Changed structure: root_input_id -> {component_id: quantity}
     required_base_components: defaultdict[int, defaultdict[int, float]] = defaultdict(lambda: defaultdict(float))
+    template_only_flags: defaultdict[int, bool] = defaultdict(bool) # Track parts where variants disallowed
 
     # --- Get Names for Root Input Assemblies (Moved Earlier for Progress Bar) ---
     root_assembly_ids = tuple(target_assemblies.keys())
@@ -295,7 +350,7 @@ def calculate_required_parts(
             # Pass only valid IDs (int) and quantities (float)
             # Pass the target assembly's part_id as the root_input_id
             get_recursive_bom(
-                api, int(part_id), float(quantity), required_base_components, int(part_id)
+                api, int(part_id), float(quantity), required_base_components, int(part_id), template_only_flags # Pass flags dict
             )
         except ValueError:
             log.error(f"Invalid ID ({part_id}) or Quantity ({quantity}). Skipping.")
@@ -338,16 +393,41 @@ def calculate_required_parts(
     if progress_callback:
         progress_callback(60, "Calculating order amounts...")
     global_parts_to_order_amount = {}
-    log.info("Calculating global order quantities...")
+    part_available_stock = {} # Store calculated available stock for display
+    log.info("Calculating global order quantities and available stock...")
     for part_id, total_required in total_required_quantities.items():
         part_data = final_part_data.get(part_id)
         if not part_data:
             log.warning(f"Missing final data for Part ID {part_id} during global calculation. Assuming 0 stock.")
             in_stock = 0.0
+            is_template = False
+            variant_stock = 0.0
         else:
             in_stock = part_data.get("in_stock", 0.0)
+            is_template = part_data.get("is_template", False)
+            variant_stock = part_data.get("variant_stock", 0.0)
 
-        global_to_order = total_required - in_stock
+        template_only = template_only_flags.get(part_id, False)
+
+        # Determine available stock based on template status and flags
+        if template_only:
+            # Variants were disallowed somewhere in the BOM for this template part
+            total_available_stock = in_stock
+            log.debug(f"Part {part_id} ({part_data.get('name', 'N/A') if part_data else 'N/A'}) - Template Only Stock: {total_available_stock}")
+        elif is_template:
+            # Template part, variants allowed
+            total_available_stock = in_stock + variant_stock
+            log.debug(f"Part {part_id} ({part_data.get('name', 'N/A') if part_data else 'N/A'}) - Template + Variant Stock: {total_available_stock}")
+        else:
+            # Regular part
+            total_available_stock = in_stock
+            log.debug(f"Part {part_id} ({part_data.get('name', 'N/A') if part_data else 'N/A'}) - Regular Stock: {total_available_stock}")
+
+
+        # Store the calculated available stock for later display
+        part_available_stock[part_id] = total_available_stock
+
+        global_to_order = total_required - total_available_stock
         # Reason: Use tolerance for float comparison
         if global_to_order > 0.001:
             global_parts_to_order_amount[part_id] = round(global_to_order, 3)
@@ -390,7 +470,7 @@ def calculate_required_parts(
                 total_required = total_required_quantities.get(part_id, 0.0)
             else:
                 part_name = part_data.get("name", f"Unknown Component (ID: {part_id})")
-                in_stock = part_data.get("in_stock", 0.0)
+                # in_stock = part_data.get("in_stock", 0.0) # We'll use the calculated available stock instead
                 total_required = total_required_quantities[part_id] # Already calculated
 
             # Get the sorted list of assembly names for this part
@@ -438,7 +518,8 @@ def calculate_required_parts(
                     "pk": part_id,
                     "name": part_name,
                     "total_required": round(total_required, 3), # Total needed across all inputs
-                    "in_stock": round(in_stock, 3), # Global stock
+                    # Use the calculated total_available_stock for display consistency
+                    "available_stock": round(part_available_stock.get(part_id, 0.0), 3),
                     "to_order": global_to_order, # Global amount to order
                     "used_in_assemblies": used_in_assemblies_str, # New field
                     "purchase_orders": purchase_orders_info, # New field with PO info

@@ -70,7 +70,13 @@ def mock_part_class(mocker: MockerFixture):
 
 # --- Helper to create mock Part instances ---
 def create_mock_part(
-    mocker: MockerFixture, pk: int, name: str, assembly: bool, in_stock: float | None
+    mocker: MockerFixture,
+    pk: int,
+    name: str,
+    assembly: bool,
+    in_stock: float | None,
+    is_template: bool = False, # Add is_template
+    variant_stock: float | None = 0.0, # Add variant_stock
 ):
     """Creates a mock Part object with specified attributes."""
     part_instance = mocker.MagicMock(spec=Part)
@@ -78,7 +84,13 @@ def create_mock_part(
     part_instance.name = name
     part_instance.assembly = assembly
     # Simulate the _data attribute which seems to be used directly
-    part_instance._data = {"in_stock": in_stock}
+    part_instance._data = {
+        "in_stock": in_stock,
+        "is_template": is_template,
+        "variant_stock": variant_stock,
+        "assembly": assembly, # Ensure assembly is also in _data if needed elsewhere
+        "name": name, # Ensure name is also in _data if needed elsewhere
+    }
     # Mock getBomItems if needed for specific tests
     part_instance.getBomItems = mocker.MagicMock(
         return_value=[]
@@ -125,11 +137,23 @@ def test_get_part_details_success(
         mock_api_class.return_value
     )  # Get the instance created by the fixture
     part_id = 101
-    expected_details = {"assembly": False, "name": "Resistor 1k", "in_stock": 50.0}
+    expected_details = {
+        "assembly": False,
+        "name": "Resistor 1k",
+        "in_stock": 50.0,
+        "is_template": False,
+        "variant_stock": 0.0,
+    }
 
     # Configure the mock Part instance returned by the mock Part class constructor
     mock_part_instance = create_mock_part(
-        mocker, pk=part_id, name="Resistor 1k", assembly=False, in_stock=50.0
+        mocker,
+        pk=part_id,
+        name="Resistor 1k",
+        assembly=False,
+        in_stock=50.0,
+        is_template=False,
+        variant_stock=0.0,
     )
     mock_part_class.return_value = mock_part_instance
 
@@ -188,12 +212,20 @@ def test_get_part_details_handles_none_stock(
     expected_details = {
         "assembly": True,
         "name": "SubAssembly",
-        "in_stock": 0.0,
-    }  # Expect 0.0 for None stock
+        "in_stock": 0.0, # Expect 0.0 for None stock
+        "is_template": True, # Example: Make this a template
+        "variant_stock": 15.0, # Example: Give it variant stock
+    }
 
     # Configure the mock Part instance
     mock_part_instance = create_mock_part(
-        mocker, pk=part_id, name="SubAssembly", assembly=True, in_stock=None
+        mocker,
+        pk=part_id,
+        name="SubAssembly",
+        assembly=True,
+        in_stock=None, # Test None handling for in_stock
+        is_template=True,
+        variant_stock=15.0,
     )
     mock_part_class.return_value = mock_part_instance
 
@@ -233,15 +265,17 @@ def test_get_bom_items_success(
     mock_bom_item1 = mocker.MagicMock()
     mock_bom_item1.sub_part = 301  # Sub part ID
     mock_bom_item1.quantity = "2.0"  # API might return string
+    mock_bom_item1.allow_variants = True # Example: Allow variants for this item
     mock_bom_item2 = mocker.MagicMock()
     mock_bom_item2.sub_part = 302
     mock_bom_item2.quantity = "1.5"
+    mock_bom_item2.allow_variants = False # Example: Disallow variants for this item
     mock_part_instance.getBomItems.return_value = [mock_bom_item1, mock_bom_item2]
     mock_part_class.return_value = mock_part_instance
 
     expected_bom = [
-        {"sub_part": 301, "quantity": 2.0},
-        {"sub_part": 302, "quantity": 1.5},
+        {"sub_part": 301, "quantity": 2.0, "allow_variants": True},
+        {"sub_part": 302, "quantity": 1.5, "allow_variants": False},
     ]
 
     bom_items = get_bom_items(mock_api_instance, assembly_id)
@@ -441,6 +475,51 @@ def mock_get_bom_items(mocker: MockerFixture):
     return mocker.patch("inventree_logic.get_bom_items")
 
 
+@pytest.fixture
+def mock_get_final_part_data(mocker: MockerFixture):
+    """Fixture to mock the get_final_part_data function."""
+    mock = mocker.patch("inventree_logic.get_final_part_data")
+    # Default mock behavior - IMPORTANT: Update this default or override in tests
+    # to include is_template and variant_stock
+    def default_side_effect(api, part_ids_tuple):
+        data = {}
+        for pid in part_ids_tuple:
+            # Provide some default structure, tests should override this
+            data[pid] = {
+                "name": f"Mock Part {pid}",
+                "in_stock": 10.0,
+                "is_template": False,
+                "variant_stock": 0.0
+            }
+        return data
+    mock.side_effect = default_side_effect
+    return mock
+
+
+@pytest.fixture
+def mock_get_recursive_bom(mocker: MockerFixture):
+    """Fixture to mock the get_recursive_bom function."""
+    mock = mocker.patch("inventree_logic.get_recursive_bom")
+
+    # Define a default side effect function that can be used or overridden
+    # Now includes template_only_flags_dict
+    def side_effect_func(api, part_id, quantity, required_components_dict, root_input_id, template_only_flags_dict):
+        # Simulate adding components based on mocked data (simplified)
+        # This mock needs to be adjusted per test case if template_only_flags logic is tested
+        if part_id == 1: # Top Assembly
+            required_components_dict[root_input_id][11] += quantity * 2.0 # Requires 2 of Base 1
+            required_components_dict[root_input_id][12] += quantity * 1.0 # Requires 1 of Base 2
+        elif part_id == 2: # Another Top Assembly
+             required_components_dict[root_input_id][12] += quantity * 3.0 # Requires 3 of Base 2
+        # Example: Simulate setting a flag if a specific template part is encountered
+        # if part_id == some_template_id_used_in_test:
+        #     template_only_flags_dict[some_base_component_id] = True
+        pass # No return value needed as it modifies the dict in place
+
+    mock.side_effect = side_effect_func # Set the default side effect
+    return mock
+
+
 # Helper function for configuring mock side effects based on part ID
 def configure_mocks_for_recursion(
     mock_get_part_details, mock_get_bom_items, part_data_map, bom_data_map
@@ -464,7 +543,8 @@ def test_get_recursive_bom_base_component(
     mock_api_instance = mock_api_class.return_value
     base_part_id = 10
     initial_quantity = 5.0
-    # required_components already updated in previous attempt
+    required_components = defaultdict(lambda: defaultdict(float))
+    template_only_flags = defaultdict(bool) # Add the new dict
     root_id = 999 # Example root ID for this test
 
     part_data = {
@@ -478,13 +558,14 @@ def test_get_recursive_bom_base_component(
 
     # Call already updated in previous attempt
     get_recursive_bom(
-        mock_api_instance, base_part_id, initial_quantity, required_components, root_id
+        mock_api_instance, base_part_id, initial_quantity, required_components, root_id, template_only_flags # Pass new dict
     )
 
     mock_get_part_details.assert_called_once_with(mock_api_instance, base_part_id)
     mock_get_bom_items.assert_not_called()  # Should not be called for base component
     # Assertion already updated in previous attempt
     assert required_components == {root_id: {base_part_id: initial_quantity}}
+    assert template_only_flags == {} # Should be empty in this case
 
 
 def test_get_recursive_bom_simple_assembly(
@@ -496,7 +577,8 @@ def test_get_recursive_bom_simple_assembly(
     base_part_id = 10
     initial_quantity = 2.0
     bom_qty = 3.0
-    # required_components already updated
+    required_components = defaultdict(lambda: defaultdict(float))
+    template_only_flags = defaultdict(bool) # Add the new dict
     root_id = assembly_id # Use assembly ID as root ID for this test
 
     part_data = {
@@ -511,7 +593,7 @@ def test_get_recursive_bom_simple_assembly(
 
     # Call already updated
     get_recursive_bom(
-        mock_api_instance, assembly_id, initial_quantity, required_components, root_id
+        mock_api_instance, assembly_id, initial_quantity, required_components, root_id, template_only_flags # Pass new dict
     )
 
     assert mock_get_part_details.call_count == 2
@@ -553,7 +635,7 @@ def test_get_recursive_bom_multi_level(
 
     # Call already updated
     get_recursive_bom(
-        mock_api_instance, top_assembly_id, initial_quantity, required_components, root_id
+        mock_api_instance, top_assembly_id, initial_quantity, required_components, root_id, template_only_flags # Pass new dict
     )
 
     assert mock_get_part_details.call_count == 3
@@ -600,7 +682,7 @@ def test_get_recursive_bom_multiple_base_components(
 
     # Call already updated
     get_recursive_bom(
-        mock_api_instance, assembly_id, initial_quantity, required_components, root_id
+        mock_api_instance, assembly_id, initial_quantity, required_components, root_id, template_only_flags # Pass new dict
     )
 
     assert mock_get_part_details.call_count == 3
@@ -725,8 +807,9 @@ def test_get_recursive_bom_bom_items_fail_mid_recursion(
     base_ok_id = 18
     base_fail_id = 19  # Should not be reached
     initial_quantity = 1.0
-    # required_components already updated
-    root_id = top_assembly_id # Use top assembly ID as root ID
+    required_components = defaultdict(lambda: defaultdict(float))
+    template_only_flags = defaultdict(bool) # Add the new dict
+    root_id = top_id # Use top assembly ID as root ID
 
     part_data = {
         top_id: {"assembly": True, "name": "Top BOM Fail Mid", "in_stock": 1.0},
@@ -748,7 +831,7 @@ def test_get_recursive_bom_bom_items_fail_mid_recursion(
         mock_get_part_details, mock_get_bom_items, part_data, bom_data
     )
 
-    get_recursive_bom(mock_api_instance, top_id, initial_quantity, required_components)
+    get_recursive_bom(mock_api_instance, top_id, initial_quantity, required_components, root_id, template_only_flags) # Pass new dict
 
     # Called for Top, Sub OK, Sub Fail, Base OK. Base Fail is NOT called as BOM fetch for Sub Fail returns None.
     assert mock_get_part_details.call_count == 4
@@ -769,7 +852,58 @@ def test_get_recursive_bom_bom_items_fail_mid_recursion(
     )  # Called, but returns None
 
     # Only the base component from the successful branch should be included
-    assert required_components == {base_ok_id: 1.0 * 2.0 * 4.0}  # 8.0
+    assert required_components == {root_id: {base_ok_id: 1.0 * 2.0 * 4.0}}  # 8.0
+# --- Tests for Variant Logic ---
+
+def test_get_recursive_bom_template_variants_disallowed(
+    mock_api_class, mock_get_part_details, mock_get_bom_items
+):
+    """
+    Tests that template_only_flags is set correctly when a BOM item
+    uses a template part but has allow_variants=False.
+    """
+    mock_api_instance = mock_api_class.return_value
+    top_assembly_id = 1000
+    template_part_id = 1001
+    initial_quantity = 5.0
+    bom_qty = 2.0
+    required_components = defaultdict(lambda: defaultdict(float))
+    template_only_flags = defaultdict(bool)
+    root_id = top_assembly_id
+
+    part_data = {
+        top_assembly_id: {"assembly": True, "name": "Top Assembly", "in_stock": 1.0, "is_template": False, "variant_stock": 0.0},
+        template_part_id: {"assembly": False, "name": "Template Part", "in_stock": 10.0, "is_template": True, "variant_stock": 5.0}, # Is a template, but not assembly
+    }
+    # Mock BOM item for the template part with allow_variants=False
+    bom_data = {
+        top_assembly_id: [
+            {"sub_part": template_part_id, "quantity": bom_qty, "allow_variants": False}
+        ]
+    }
+
+    configure_mocks_for_recursion(
+        mock_get_part_details, mock_get_bom_items, part_data, bom_data
+    )
+
+    get_recursive_bom(
+        mock_api_instance, top_assembly_id, initial_quantity, required_components, root_id, template_only_flags
+    )
+
+    # Assertions
+    mock_get_part_details.assert_any_call(mock_api_instance, top_assembly_id)
+    mock_get_part_details.assert_any_call(mock_api_instance, template_part_id)
+    mock_get_bom_items.assert_called_once_with(mock_api_instance, top_assembly_id)
+
+    # The template part itself should be added as a requirement
+    expected_qty = initial_quantity * bom_qty
+    assert required_components == {root_id: {template_part_id: expected_qty}}
+
+    # Crucially, the template_only_flags should be set for the template part ID
+    assert template_only_flags == {template_part_id: True}
+
+
+    assert template_only_flags == {} # Should be empty
 
 
 # --- Test get_final_part_data ---
@@ -1073,13 +1207,13 @@ def test_calculate_required_parts_none_needed(
     mock_api_instance = mock_api_class.return_value
     target_assemblies = {1000: 1.0}
 
-    # Mock final data: Plenty of stock
+    # Mock final data: Plenty of stock (including new fields)
     mock_get_final_part_data.return_value = {
-        10: {"name": "Part 10", "in_stock": 100.0},
-        11: {"name": "Part 11", "in_stock": 100.0},
+        10: {"name": "Part 10", "in_stock": 100.0, "is_template": False, "variant_stock": 0.0},
+        11: {"name": "Part 11", "in_stock": 100.0, "is_template": False, "variant_stock": 0.0},
     }
 
-    # Required: Part 10 = 5.0, Part 11 = 2.0
+    # Required: Part 10 = 5.0, Part 11 = 2.0 (from mock_get_recursive_bom)
     expected_order_list = []  # Empty list
 
     parts_to_order = calculate_required_parts(mock_api_instance, target_assemblies)
@@ -1116,28 +1250,33 @@ def test_calculate_required_parts_final_data_fails(
     target_assemblies = {1000: 1.0}
 
     # Mock final data: Simulate failure for Part 10
+    # Mock final data: Simulate failure for Part 10 (ensure Part 11 has new fields)
     mock_get_final_part_data.return_value = {
-        # 10: Missing
-        11: {"name": "Part 11", "in_stock": 1.0}  # Needs ordering
+        # 10: Missing - function should provide defaults
+        11: {"name": "Part 11", "in_stock": 1.0, "is_template": False, "variant_stock": 0.0} # Needs ordering
     }
 
     # Required: Part 10 = 5.0, Part 11 = 2.0
     expected_order_list = [
-        # Sorted by name
-        {
+        # Sorted by name (Unknown comes after Part 11)
+         {
             "pk": 11,
             "name": "Part 11",
-            "required": 2.0,
+            "total_required": 2.0, # Use total_required
             "in_stock": 1.0,
             "to_order": 1.0,
+            "used_in_assemblies": "Assembly 1000", # Assuming mock name
+            "purchase_orders": []
         },
         {
             "pk": 10,
             "name": "Unknown (ID: 10)",
-            "required": 5.0,
-            "in_stock": 0.0,
+            "total_required": 5.0, # Use total_required
+            "in_stock": 0.0, # Default stock on failure
             "to_order": 5.0,
-        },  # Fallback
+            "used_in_assemblies": "Assembly 1000", # Assuming mock name
+            "purchase_orders": []
+        }, # Fallback
     ]
 
     parts_to_order = calculate_required_parts(mock_api_instance, target_assemblies)
@@ -1177,8 +1316,8 @@ def test_calculate_required_parts_float_tolerance(
 
     # Mock final data: Stock is *almost* enough
     mock_get_final_part_data.return_value = {
-        10: {"name": "Part 10", "in_stock": 4.9995},  # Difference is 0.0005
-        11: {"name": "Part 11", "in_stock": 1.999},  # Difference is 0.001
+        10: {"name": "Part 10", "in_stock": 4.9995, "is_template": False, "variant_stock": 0.0},  # Difference is 0.0005
+        11: {"name": "Part 11", "in_stock": 1.999, "is_template": False, "variant_stock": 0.0},  # Difference is 0.001
     }
 
     # Required: Part 10 = 5.0, Part 11 = 2.0
@@ -1192,6 +1331,111 @@ def test_calculate_required_parts_float_tolerance(
     assert mock_get_recursive_bom.call_count == 1
     final_required_dict = mock_get_recursive_bom.call_args[0][3]
     assert final_required_dict == {10: 5.0, 11: 2.0}
+    mock_get_final_part_data.assert_called_once_with(
+        mock_api_instance, tuple(sorted(final_required_dict.keys()))
+    )
+    assert parts_to_order == expected_order_list
+
+
+# --- Tests for Variant Logic in calculate_required_parts ---
+
+def test_calculate_required_parts_template_variants_allowed(
+    mock_api_class, mock_get_recursive_bom, mock_get_final_part_data
+):
+    """
+    Tests calculation when a template part is required, variants are allowed,
+    and stock calculation should use template + variant stock.
+    """
+    mock_api_instance = mock_api_class.return_value
+    target_assemblies = {2000: 1.0} # Assembly requiring the template part
+
+    template_part_id = 1001
+    required_qty = 5.0
+
+    # Mock get_recursive_bom to simulate requiring 5.0 of the template part
+    # and importantly, NOT setting the template_only_flags for it.
+    def recursive_bom_side_effect(api, part_id, quantity, req_dict, root_id, flags_dict):
+        if part_id == 2000:
+            req_dict[root_id][template_part_id] += quantity * required_qty
+        # flags_dict remains empty as variants are allowed in this scenario's BOM path
+    mock_get_recursive_bom.side_effect = recursive_bom_side_effect
+
+    # Mock final data for the template part: Not enough in_stock alone, but enough with variant_stock
+    mock_get_final_part_data.return_value = {
+        template_part_id: {
+            "name": "Template Part A",
+            "in_stock": 2.0,
+            "is_template": True,
+            "variant_stock": 10.0 # 2 + 10 = 12.0 available > 5.0 required
+        }
+    }
+
+    # Expected: No order needed as 2.0 + 10.0 >= 5.0
+    expected_order_list = []
+
+    parts_to_order = calculate_required_parts(mock_api_instance, target_assemblies)
+
+    assert mock_get_recursive_bom.call_count == 1
+    final_required_dict = mock_get_recursive_bom.call_args[0][3]
+    assert final_required_dict == {template_part_id: required_qty}
+    mock_get_final_part_data.assert_called_once_with(
+        mock_api_instance, tuple(sorted(final_required_dict.keys()))
+    )
+    assert parts_to_order == expected_order_list
+
+
+def test_calculate_required_parts_template_variants_disallowed(
+    mock_api_class, mock_get_recursive_bom, mock_get_final_part_data
+):
+    """
+    Tests calculation when a template part is required, variants were disallowed
+    on the BOM line, and stock calculation should use ONLY template stock.
+    """
+    mock_api_instance = mock_api_class.return_value
+    target_assemblies = {2001: 1.0} # Assembly requiring the template part
+
+    template_part_id = 1002
+    required_qty = 5.0
+
+    # Mock get_recursive_bom to simulate requiring 5.0 of the template part
+    # AND setting the template_only_flags for it.
+    def recursive_bom_side_effect(api, part_id, quantity, req_dict, root_id, flags_dict):
+        if part_id == 2001:
+            req_dict[root_id][template_part_id] += quantity * required_qty
+            # Simulate that the BOM traversal set the flag because allow_variants=False
+            flags_dict[template_part_id] = True
+    mock_get_recursive_bom.side_effect = recursive_bom_side_effect
+
+    # Mock final data for the template part: Not enough in_stock alone, variant_stock is ignored
+    mock_get_final_part_data.return_value = {
+        template_part_id: {
+            "name": "Template Part B",
+            "in_stock": 2.0, # Available = 2.0
+            "is_template": True,
+            "variant_stock": 10.0 # This should be ignored
+        }
+    }
+
+    # Expected: Order needed = Required (5.0) - Available (2.0) = 3.0
+    expected_order_list = [
+        {
+            "pk": template_part_id,
+            "name": "Template Part B",
+            "total_required": 5.0,
+            "in_stock": 2.0, # Report the template's stock
+            "to_order": 3.0,
+            "used_in_assemblies": "Assembly 2001", # Assuming mock name
+            "purchase_orders": []
+        }
+    ]
+
+    parts_to_order = calculate_required_parts(mock_api_instance, target_assemblies)
+
+    assert mock_get_recursive_bom.call_count == 1
+    final_required_dict = mock_get_recursive_bom.call_args[0][3]
+    template_flags = mock_get_recursive_bom.call_args[0][5] # Get the flags dict passed
+    assert final_required_dict == {template_part_id: required_qty}
+    assert template_flags == {template_part_id: True} # Verify flag was set by mock
     mock_get_final_part_data.assert_called_once_with(
         mock_api_instance, tuple(sorted(final_required_dict.keys()))
     )
