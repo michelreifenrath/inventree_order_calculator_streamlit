@@ -206,7 +206,7 @@ def calculate_required_parts(
     # --- Build the final FLAT list ---
     final_flat_parts_list = []
     log.info("Building final flat list with assembly context...")
-    PO_STATUS_MAP = {10: "Pending", 20: "In Progress", 30: "Complete", 40: "Cancelled", 50: "Lost", 60: "Returned", 70: "On Hold"}
+    PO_STATUS_MAP = {10: "Pending", 20: "Placed", 25: "On Hold", 30: "Complete", 40: "Cancelled", 50: "Lost", 60: "Returned"} # Corrected based on InvenTree source
 
     # --- Pre-fetch Purchase Order Data (Refactored v3 - Fetch POs first) ---
     part_po_line_data = defaultdict(list) # Store {part_id: [{'quantity': qty, 'po_ref': ref, 'po_status': status}, ...]}
@@ -255,13 +255,13 @@ def calculate_required_parts(
         # --- Step 2 (New): Fetch Relevant Purchase Orders (Pending/In Progress) ---
         if progress_callback: progress_callback(po_fetch_progress_step + 5, "Fetching relevant purchase orders...")
         try:
-            log.info("Refactored PO Fetch: Fetching relevant Purchase Orders (Status: Pending or In Progress)...")
-            # Define relevant statuses
-            relevant_statuses = [10, 20, 70] # 10: Pending, 20: In Progress, 70: On Hold
-            # Fetch all POs with these statuses (might be many, but necessary)
-            # Consider if chunking is needed here if the number of pending/in progress POs is huge
-            # For now, assume a single call is feasible. Add chunking if performance issues arise.
-            relevant_orders = PurchaseOrder.list(api, status__in=relevant_statuses, fields=['pk', 'reference', 'status'])
+            log.info("Refactored PO Fetch: Fetching ALL Purchase Orders (API status filter unreliable)...")
+            # Define desired statuses for local filtering
+            relevant_statuses = [10, 20, 25] # 10: Pending, 20: Placed, 25: On Hold (Corrected based on source code)
+            # Fetch ALL POs without API status filter due to observed unreliability (especially for status 70)
+            # We will filter locally in the subsequent loop. This might be less efficient for large numbers of POs.
+            log.warning("Fetching all POs without status filter due to API filter issues. This might be slow.")
+            relevant_orders = PurchaseOrder.list(api, fields=['pk', 'reference', 'status']) # Removed status__in filter
 
             if relevant_orders:
                 processed_relevant_count = 0
@@ -279,7 +279,7 @@ def calculate_required_parts(
                     else:
                         # Log if a PO with an unexpected status was returned by the API call
                         log.warning(f"API returned PO {order.pk} (Ref: {order._data.get('reference', 'N/A')}) with unexpected status {status_code} despite status__in filter. Ignoring.")
-                log.info(f"Processed details for {processed_relevant_count} POs with relevant statuses ({relevant_statuses}).")
+                log.info(f"Filtered {len(relevant_orders)} fetched POs down to {processed_relevant_count} POs with relevant statuses ({relevant_statuses}).") # Line number adjusted due to previous diff
             else:
                 log.info("No relevant Purchase Orders (Pending/In Progress) found.")
 

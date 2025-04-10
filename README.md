@@ -13,6 +13,7 @@ This project provides a Streamlit web application to calculate the required base
 - Displays the parts that need to be ordered, **grouped by the initial input assembly**, with color-highlighted headers for each group.
 - Allows downloading the **grouped order list** (including input assembly information) as a CSV file.
 - Uses Streamlit caching to optimize performance by reducing redundant API calls.
+- Includes parts currently on Purchase Orders with statuses "Pending" (10), "Placed" (20), or "On Hold" (25) in the stock availability calculation.
 
 ## Project Structure
 
@@ -144,7 +145,11 @@ This is the easiest way to run the application with Docker.
   black .
   ```
 
+## Technical Notes
+
+- **Purchase Order Status Handling:** The application considers parts on POs with statuses Pending (10), Placed (20), and On Hold (25). Due to observed inconsistencies in the InvenTree API's status filtering (especially for status 25), the application fetches *all* POs and filters them locally in Python to ensure accuracy.
+- **PO Line Data Anomaly:** A workaround is included to handle cases where a PO line item's `supplier_part` field is null, but the correct SupplierPart PK is found in the line item's `part` field.
+
 ## Contributing
 
-Please refer to `PLANNING.md` and `TASK.md` for ongoing work and project guidelines. Follow the established code style and testing practices.
 Please refer to `PLANNING.md` and `TASK.md` for ongoing work and project guidelines. Follow the established code style and testing practices.
