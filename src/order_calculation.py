@@ -255,8 +255,8 @@ def calculate_required_parts(
                  "used_in_assemblies": set(), # Initialize as set
                  "purchase_orders": [], # Initialize as list
                  # Add manufacturer/supplier if needed later
-                 "manufacturer": part_data.get("manufacturer_name", "") if part_data else "",
-                 "supplier": part_data.get("supplier_name", "") if part_data else "",
+                 "manufacturer_name": part_data.get("manufacturer_name") if part_data else None, # Use correct key
+                 "supplier_names": part_data.get("supplier_names", []) if part_data else [], # Use correct key and get list
              }
 
     # --- Collect Root Assembly Names for Needed Parts ---
@@ -298,7 +298,7 @@ def calculate_required_parts(
         )
         manufacturer_match = (
             exclude_manufacturer_name
-            and part.get("manufacturer") == exclude_manufacturer_name
+            and part.get("manufacturer_name") == exclude_manufacturer_name # Use correct key
         )
 
         if supplier_match:
