@@ -208,95 +208,177 @@ def calculate_required_parts(
     log.info("Building final flat list with assembly context...")
     PO_STATUS_MAP = {10: "Pending", 20: "In Progress", 30: "Complete", 40: "Cancelled", 50: "Lost", 60: "Returned", 70: "On Hold"}
 
-    # --- Pre-fetch Purchase Order Data (Optimized v2) ---
-    unique_order_ids_to_fetch = set()
-    part_po_line_data = defaultdict(list) # Store {part_id: [{'quantity': qty, 'order_id': oid}, ...]}
-    fetched_po_details = {} # Store {order_id: {'ref': ref, 'status_code': code, 'status_label': label}}
+    # --- Pre-fetch Purchase Order Data (Refactored v3 - Fetch POs first) ---
+    part_po_line_data = defaultdict(list) # Store {part_id: [{'quantity': qty, 'po_ref': ref, 'po_status': status}, ...]}
     all_supplier_part_pks = [] # Store all relevant SupplierPart PKs
-    CHUNK_SIZE = 100 # Define chunk size for PO fetching as well
+    sp_pk_to_part_id = {} # Map SupplierPart PK back to Part ID
+    relevant_po_details = {} # Store {po_pk: {'ref': ref, 'status_label': label}}
+    relevant_po_pks = [] # List of relevant PO PKs
+    CHUNK_SIZE = 100 # Define chunk size for API calls
 
     if IMPORTS_AVAILABLE:
-        po_fetch_progress_step = 80
+        po_fetch_progress_step = 80 # Base progress step
         if progress_callback: progress_callback(po_fetch_progress_step, "Fetching supplier parts...")
+
+        # --- Step 1 (Existing): Fetch SupplierParts for parts needing order ---
         try:
             parts_needing_order_ids = [pid for pid, amount in global_parts_to_order_amount.items() if amount > 0]
             if parts_needing_order_ids:
-                log.info(f"Optimized PO Fetch: Fetching SupplierParts for {len(parts_needing_order_ids)} parts...")
-                # Attempt batch fetch for SupplierParts using part__in
+                log.info(f"Refactored PO Fetch: Fetching SupplierParts for {len(parts_needing_order_ids)} parts...")
                 try:
                     # Fetch 'part' field too, to map back SP pk to original Part pk
                     supplier_parts_list = SupplierPart.list(api, part__in=parts_needing_order_ids, fields=['pk', 'part'])
                     all_supplier_part_pks = [sp.pk for sp in supplier_parts_list]
                     # Create a map from supplier_part pk back to the original part pk
                     sp_pk_to_part_id = {sp.pk: sp._data.get('part') for sp in supplier_parts_list}
-                    log.info(f"Fetched {len(supplier_parts_list)} supplier parts via batch.")
+                    log.info(f"Fetched {len(supplier_parts_list)} supplier parts via batch. Map created.")
+                    # --- Roo Debug ---
+                    log.info(f"DEBUG PO Fetch: sp_pk_to_part_id map created: {sp_pk_to_part_id}")
+                    if 780 in sp_pk_to_part_id:
+                        log.info(f"DEBUG PO Fetch: SupplierPart 780 maps to Part ID: {sp_pk_to_part_id.get(780)}")
+                    else:
+                        log.warning("DEBUG PO Fetch: SupplierPart 780 NOT found in sp_pk_to_part_id map keys!")
+                    # --- End Roo Debug ---
                 except Exception as batch_sp_err:
-                    log.warning(f"Batch fetch for SupplierParts failed ({batch_sp_err}). Individual fetch might be slow.")
-                    # Fallback or error handling if batch fails - for now, we'll proceed, PO info might be incomplete
+                    log.warning(f"Batch fetch for SupplierParts failed ({batch_sp_err}). PO info might be incomplete.")
                     all_supplier_part_pks = []
                     sp_pk_to_part_id = {}
-
-
-                # Fetch all relevant PO Lines in one batch using collected SupplierPart PKs
-                if all_supplier_part_pks:
-                    log.info(f"Optimized PO Fetch: Fetching PO Lines for {len(all_supplier_part_pks)} SupplierParts...")
-                    if progress_callback: progress_callback(po_fetch_progress_step + 5, "Fetching purchase order lines...")
-                    all_po_lines = []
-                    try:
-                        # Fetch PO lines in chunks
-                        for sp_pk_chunk in _chunk_list(all_supplier_part_pks, CHUNK_SIZE):
-                             log.debug(f"Fetching PO lines for chunk of {len(sp_pk_chunk)} SupplierPart PKs...")
-                             chunk_po_lines = PurchaseOrderLineItem.list(api, supplier_part__in=sp_pk_chunk, fields=['order', 'quantity', 'supplier_part'])
-                             if chunk_po_lines:
-                                 all_po_lines.extend(chunk_po_lines)
-                        log.info(f"Fetched a total of {len(all_po_lines)} PO lines across all chunks.")
-
-                        # Process the fetched lines
-                        for line in all_po_lines:
-                            order_id = line._data.get('order')
-                            supplier_part_pk = line._data.get('supplier_part')
-                            part_id = sp_pk_to_part_id.get(supplier_part_pk) # Find original part_id
-
-                            if order_id and part_id:
-                                unique_order_ids_to_fetch.add(order_id)
-                                part_po_line_data[part_id].append({'quantity': line.quantity, 'order_id': order_id})
-                    except Exception as chunked_line_err:
-                         log.error(f"Error during chunked PO line fetch: {chunked_line_err}", exc_info=True)
-                         # Clear data as it might be incomplete
-                         unique_order_ids_to_fetch.clear()
-                         part_po_line_data.clear()
+            else:
+                log.info("Refactored PO Fetch: No parts require ordering, skipping SupplierPart fetch.")
 
         except Exception as e:
             log.error(f"Error during initial supplier part fetch for POs: {e}", exc_info=True)
-            # Clear data as it might be incomplete
-            unique_order_ids_to_fetch.clear()
-            part_po_line_data.clear()
+            # Clear potentially partial data
+            all_supplier_part_pks = []
+            sp_pk_to_part_id = {}
 
-        # Fetch details for unique POs
-        if unique_order_ids_to_fetch:
-            log.info(f"Fetching details for {len(unique_order_ids_to_fetch)} unique Purchase Orders...")
-            if progress_callback: progress_callback(90, f"Fetching {len(unique_order_ids_to_fetch)} PO details...")
-            order_ids_list = list(unique_order_ids_to_fetch)
+        # --- Step 2 (New): Fetch Relevant Purchase Orders (Pending/In Progress) ---
+        if progress_callback: progress_callback(po_fetch_progress_step + 5, "Fetching relevant purchase orders...")
+        try:
+            log.info("Refactored PO Fetch: Fetching relevant Purchase Orders (Status: Pending or In Progress)...")
+            # Define relevant statuses
+            relevant_statuses = [10, 20, 70] # 10: Pending, 20: In Progress, 70: On Hold
+            # Fetch all POs with these statuses (might be many, but necessary)
+            # Consider if chunking is needed here if the number of pending/in progress POs is huge
+            # For now, assume a single call is feasible. Add chunking if performance issues arise.
+            relevant_orders = PurchaseOrder.list(api, status__in=relevant_statuses, fields=['pk', 'reference', 'status'])
+
+            if relevant_orders:
+                processed_relevant_count = 0
+                for order in relevant_orders:
+                    status_code = order._data.get('status')
+                    # Explicitly check if the status is one we want, as a safeguard
+                    if status_code in relevant_statuses:
+                        order_pk = order.pk
+                        relevant_po_pks.append(order_pk)
+                        relevant_po_details[order_pk] = {
+                            'ref': order._data.get('reference', 'No Ref'),
+                            'status_label': PO_STATUS_MAP.get(status_code, f"Unknown ({status_code})")
+                        }
+                        processed_relevant_count += 1
+                    else:
+                        # Log if a PO with an unexpected status was returned by the API call
+                        log.warning(f"API returned PO {order.pk} (Ref: {order._data.get('reference', 'N/A')}) with unexpected status {status_code} despite status__in filter. Ignoring.")
+                log.info(f"Processed details for {processed_relevant_count} POs with relevant statuses ({relevant_statuses}).")
+            else:
+                log.info("No relevant Purchase Orders (Pending/In Progress) found.")
+
+        except Exception as e:
+            log.error(f"Error fetching relevant Purchase Orders: {e}. PO info might be incomplete.", exc_info=True)
+            relevant_po_details.clear()
+            relevant_po_pks = [] # Ensure list is empty
+
+        # --- Step 3 (New): Fetch PO Lines using order__in filter ---
+        all_po_lines = []
+        if relevant_po_pks: # Only fetch lines if we have relevant POs
+            if progress_callback: progress_callback(po_fetch_progress_step + 10, f"Fetching PO lines for {len(relevant_po_pks)} POs...")
+            log.info(f"Refactored PO Fetch: Fetching PO Lines for {len(relevant_po_pks)} relevant POs using order__in...")
             try:
-                 # Fetch PO details in chunks
-                 for order_id_chunk in _chunk_list(order_ids_list, CHUNK_SIZE):
-                     log.debug(f"Fetching PO details for chunk of {len(order_id_chunk)} Order PKs...")
-                     chunk_orders = PurchaseOrder.list(api, pk__in=order_id_chunk, fields=['pk', 'reference', 'status'])
-                     if chunk_orders:
-                         for order in chunk_orders:
-                             status_code = order._data.get('status')
-                             # Only store details for relevant statuses
-                             if status_code in [10, 20]: # Pending or In Progress
-                                 fetched_po_details[order.pk] = {
-                                     'ref': order._data.get('reference', 'No Ref'),
-                                     'status_code': status_code,
-                                     'status_label': PO_STATUS_MAP.get(status_code, f"Unknown ({status_code})")
-                                 }
-                 log.info(f"Fetched details for {len(fetched_po_details)} relevant POs across all chunks.")
-            except Exception as e:
-                 log.error(f"Error during chunked PO detail fetch: {e}. PO info might be incomplete.", exc_info=True)
-                 # Individual fallback is removed to avoid potential hangs if batch fails massively
+                # Fetch PO lines in chunks based on relevant PO PKs
+                for i, po_pk_chunk in enumerate(_chunk_list(relevant_po_pks, CHUNK_SIZE)):
+                    log.debug(f"Fetching PO lines chunk {i+1} for {len(po_pk_chunk)} PO PKs...")
+                    try:
+                        # Use order__in filter - Fetch 'part' field for fallback logic
+                        chunk_po_lines = PurchaseOrderLineItem.list(api, order__in=po_pk_chunk, fields=['pk', 'order', 'quantity', 'supplier_part', 'part']) # Added 'pk' and 'part'
+                        if chunk_po_lines:
+                            log.debug(f"Fetched {len(chunk_po_lines)} lines in chunk {i+1}.")
+                            all_po_lines.extend(chunk_po_lines)
+                        else:
+                            log.debug(f"No lines returned for PO chunk {i+1}.")
+                    except Exception as line_fetch_err:
+                        log.error(f"ERROR fetching PO lines for PO chunk {i+1} (Order PKs: {po_pk_chunk}): {line_fetch_err}", exc_info=True)
+                        # Continue to next chunk on error
+                log.info(f"Fetched a total of {len(all_po_lines)} PO lines across all relevant POs.")
+            except Exception as outer_line_fetch_err:
+                log.error(f"ERROR during the PO line chunking/fetching process (order__in): {outer_line_fetch_err}", exc_info=True)
+                all_po_lines = [] # Ensure list is empty if process failed
+        else:
+            log.info("Refactored PO Fetch: No relevant POs found, skipping PO Line fetch.")
 
+        # --- Step 4 (New): Process Lines and Link to Parts ---
+        if all_po_lines:
+            if progress_callback: progress_callback(po_fetch_progress_step + 15, f"Processing {len(all_po_lines)} PO lines...")
+            log.info(f"Refactored PO Fetch: Processing {len(all_po_lines)} fetched PO lines and linking to parts...")
+            processed_count = 0
+            skipped_count = 0
+            try:
+                # --- Start of Corrected Processing Loop ---
+                for line in all_po_lines:
+                    line_pk = line.pk # Get line PK for logging
+                    supplier_part_pk = line._data.get('supplier_part')
+                    order_id = line._data.get('order')
+                    part_id = None # Initialize part_id
+
+                    # Attempt 1: Use the standard supplier_part field
+                    if supplier_part_pk:
+                        part_id = sp_pk_to_part_id.get(supplier_part_pk)
+
+                    # Attempt 2 (Fallback): If supplier_part is None, try using the line's 'part' field
+                    if not part_id:
+                        fallback_sp_pk = line._data.get('part')
+                        if fallback_sp_pk:
+                            part_id = sp_pk_to_part_id.get(fallback_sp_pk)
+                            if part_id:
+                                log.warning(f"Data Anomaly: Used fallback line.part field ({fallback_sp_pk}) to map PO Line {line_pk} to Part ID {part_id} (SP PK was None).")
+                            # else: Fallback also failed, part_id remains None
+
+                    # Now part_id is either the correctly mapped ID, the fallback mapped ID, or None
+                    po_info = relevant_po_details.get(order_id) # Get pre-fetched PO details
+
+                    # --- Roo Debug ---
+                    # Check if the *resolved* part_id matches our target, regardless of how it was found
+                    if part_id == 1087:
+                        log.info(f"DEBUG PO Fetch (Refactored+Fallback): Processing line {line_pk} which resolved to Part ID 1087. Original SP PK: {supplier_part_pk}, Fallback PK used: {line._data.get('part') if not supplier_part_pk else 'N/A'}. Order ID: {order_id}. PO Info found: {po_info is not None}")
+                    # --- End Roo Debug ---
+
+                    if part_id and po_info: # Check if part mapping (either primary or fallback) and PO info exist
+                        part_po_line_data[part_id].append({
+                            'quantity': line.quantity,
+                            'po_ref': po_info['ref'],
+                            'po_status': po_info['status_label']
+                        })
+                        processed_count += 1
+                    elif not part_id: # This means both primary and fallback mapping failed
+                        # Log only if we expected to map this line based on *either* the SP_PK or the fallback PK
+                        original_sp_pk = line._data.get('supplier_part')
+                        fallback_sp_pk = line._data.get('part')
+                        # Check if either the original SP PK or the fallback SP PK was in our map of relevant supplier parts
+                        should_have_mapped = (original_sp_pk in sp_pk_to_part_id) or (fallback_sp_pk in sp_pk_to_part_id)
+
+                        if should_have_mapped:
+                             log.warning(f"Refactored PO Fetch: Could not map PO Line {line_pk} to a Part ID using SP PK ({original_sp_pk}) or fallback line.part PK ({fallback_sp_pk}). Skipping line.")
+                        # else: # Don't log if we never expected to map this line anyway
+                        #    log.debug(f"Skipping PO Line {line_pk} as neither its SP PK ({original_sp_pk}) nor fallback PK ({fallback_sp_pk}) map to a required part.")
+                        skipped_count += 1 # Corrected indentation
+                    elif not po_info:
+                         # This case shouldn't happen with the refactored logic but good to keep
+                         log.error(f"Logic Error: Found line {line_pk} for Order ID {order_id} but no details were fetched for this PO.")
+                         skipped_count += 1 # Corrected indentation
+                # --- End of Corrected Processing Loop ---
+
+                log.info(f"Finished processing PO lines. Linked: {processed_count}, Skipped (no part map): {skipped_count}")
+            except Exception as process_line_err:
+                log.error(f"Error during PO line processing (Refactored): {process_line_err}", exc_info=True)
     # --- Assemble Final List using pre-fetched data ---
     if progress_callback: progress_callback(98, "Assembling final list...")
     for part_id, global_to_order in global_parts_to_order_amount.items():
@@ -315,18 +397,19 @@ def calculate_required_parts(
 
             used_in_assemblies_str = ", ".join(sorted(list(part_to_root_assemblies.get(part_id, set()))))
 
-            # Build purchase_orders_info using pre-fetched details
-            purchase_orders_info = []
-            if part_id in part_po_line_data:
-                for line_data in part_po_line_data[part_id]:
-                    order_id = line_data['order_id']
-                    if order_id in fetched_po_details: # Check if PO details were fetched and relevant
-                        po_detail = fetched_po_details[order_id]
-                        purchase_orders_info.append({
-                            "ref": po_detail['ref'],
-                            "quantity": line_data['quantity'],
-                            "status": po_detail['status_label']
-                        })
+            # Build purchase_orders_info using pre-fetched data (Refactored)
+            po_data_list = part_po_line_data.get(part_id, []) # Get the pre-assembled list from the refactored data structure
+
+            # Rename keys to match expected format for final list structure used later
+            purchase_orders_info = [
+                {"ref": item['po_ref'], "quantity": item['quantity'], "status": item['po_status']}
+                for item in po_data_list
+            ]
+
+            # --- Roo Debug Logging START ---
+            if part_id == 1087:
+                 log.info(f"DEBUG (Refactored): Final purchase_orders_info for Part ID {part_id}: {purchase_orders_info}")
+            # --- Roo Debug Logging END ---
 
             # Append data for this part
             final_flat_parts_list.append({
@@ -357,24 +440,25 @@ def calculate_required_parts(
             part_id_for_log = part.get("pk")
             supplier_names_for_log = part.get("supplier_names", [])
             suppliers_lower_for_log = [s.lower() for s in supplier_names_for_log]
-            # Log details specifically for part 1516 or any part being filtered
-            if part_id_for_log == 1516:
-                 log.info(f"Checking Part ID {part_id_for_log}: Suppliers = {supplier_names_for_log}, Lowercase = {suppliers_lower_for_log}. Comparing against '{supplier_to_exclude_lower}'.")
+            # Log details if needed
+            # if part_id_for_log == SOME_ID_TO_DEBUG:
+            #      log.info(f"Checking Part ID {part_id_for_log}: Suppliers = {supplier_names_for_log}, Lowercase = {suppliers_lower_for_log}. Comparing against '{supplier_to_exclude_lower}'.")
 
             # Apply the filter condition
             if supplier_to_exclude_lower not in suppliers_lower_for_log:
                 temp_filtered_list.append(part)
-            elif part_id_for_log == 1516: # Log if 1516 is being excluded
-                 log.info(f"Excluding Part ID {part_id_for_log} because '{supplier_to_exclude_lower}' was found in {suppliers_lower_for_log}.")
+            # elif part_id_for_log == SOME_ID_TO_DEBUG: # Log if specific part is being excluded
+            #      log.info(f"Excluding Part ID {part_id_for_log} because '{supplier_to_exclude_lower}' was found in {suppliers_lower_for_log}.")
 
         filtered_list = temp_filtered_list
         # Log the state *after* supplier filtering is complete
         supplier_filtered_ids = [p.get('pk') for p in filtered_list]
         log.info(f"After supplier filter. Remaining IDs ({len(supplier_filtered_ids)}): {supplier_filtered_ids}")
-        if 1516 not in supplier_filtered_ids and exclude_supplier_name and exclude_supplier_name.strip().lower() == "haip solutions gmbh":
-             log.info("Confirmed: Part 1516 is NOT in the list after supplier filter.")
-        elif 1516 in supplier_filtered_ids and exclude_supplier_name and exclude_supplier_name.strip().lower() == "haip solutions gmbh":
-             log.warning("Inconsistency: Part 1516 IS STILL in the list after supplier filter, despite logs indicating exclusion.")
+        # Example check for a specific part after filtering (can be removed or adapted)
+        # if SOME_ID_TO_DEBUG not in supplier_filtered_ids and exclude_supplier_name:
+        #      log.info(f"Confirmed: Part {SOME_ID_TO_DEBUG} is NOT in the list after supplier filter.")
+        # elif SOME_ID_TO_DEBUG in supplier_filtered_ids and exclude_supplier_name:
+        #      log.warning(f"Inconsistency: Part {SOME_ID_TO_DEBUG} IS STILL in the list after supplier filter.")
 
         parts_removed_supplier = original_count - len(filtered_list)
         if parts_removed_supplier > 0:
@@ -403,10 +487,11 @@ def calculate_required_parts(
     # Log the final list before returning
     final_ids = [p.get('pk') for p in final_flat_parts_list]
     log.info(f"Final list being returned by calculate_required_parts. IDs ({len(final_ids)}): {final_ids}")
-    if 1516 not in final_ids and exclude_supplier_name and exclude_supplier_name.strip().lower() == "haip solutions gmbh":
-        log.info("Confirmed: Part 1516 is NOT in the final returned list.")
-    elif 1516 in final_ids and exclude_supplier_name and exclude_supplier_name.strip().lower() == "haip solutions gmbh":
-        log.warning("Inconsistency: Part 1516 IS in the final returned list!")
+    # Example check for a specific part in the final list (can be removed or adapted)
+    # if SOME_ID_TO_DEBUG not in final_ids and exclude_supplier_name:
+    #     log.info(f"Confirmed: Part {SOME_ID_TO_DEBUG} is NOT in the final returned list.")
+    # elif SOME_ID_TO_DEBUG in final_ids and exclude_supplier_name:
+    #     log.warning(f"Inconsistency: Part {SOME_ID_TO_DEBUG} IS in the final returned list!")
 
     # --- Final Sorting ---
     final_flat_parts_list.sort(key=lambda x: x["name"])

@@ -19,6 +19,8 @@
 - **Formatting:** Run `black .` on the project.
 - **Deployment:** Publish the project to a GitHub repository.
 - **Feature:** Handle Part Variants in Stock Calculation (2025-04-09).
+- **Bug Investigation:** Part 1087 not shown as 'on order' despite being on PO PO-P-000287 (Status: In Progress). Likely cause: Data linking issue (Part -> SupplierPart -> POLine) in InvenTree. User to verify links in GUI. (2025-04-10)
+- **Refactoring (Bugfix):** Change PO fetching logic in `inventree_logic.py` to fetch relevant POs first, then lines using `order__in` filter, avoiding the unreliable `supplier_part__in` filter. (2025-04-10) - **Completed (2025-04-10)** (Also added fallback for line.part field anomaly)
 ## Completed Tasks
 - Check if the project fulfills the project rules (2025-04-08).
 - **Feature:** Add a "Restart Calculation" button to `app.py` to allow users to clear results and start over (2025-04-08).
