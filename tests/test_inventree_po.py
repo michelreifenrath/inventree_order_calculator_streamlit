@@ -3,6 +3,7 @@ from inventree.api import InvenTreeAPI
 from inventree.part import Part
 from inventree.company import SupplierPart
 
+
 def main():
     url = "http://10.0.0.33"
     token = "inv-455d26918f7f3e8cdc2ea8c6e1270e72cd02df40-20250408"
@@ -39,6 +40,7 @@ def main():
 
             try:
                 from inventree.purchase_order import PurchaseOrderLineItem
+
                 po_lines = PurchaseOrderLineItem.list(api, part=sp.pk)
             except Exception as e:
                 print(f"    Error fetching PO line items: {e}")
@@ -50,14 +52,18 @@ def main():
 
             for line in po_lines:
                 try:
-                    order_id = line._data.get('order')
+                    order_id = line._data.get("order")
                     from inventree.purchase_order import PurchaseOrder
+
                     order = PurchaseOrder(api, pk=order_id)
-                    status = order._data.get('status', 'Unknown')
-                    ref = order._data.get('reference', 'No Ref')
-                    print(f"    PO Line ID: {line.pk}, Order Ref: {ref}, Status: {status}")
+                    status = order._data.get("status", "Unknown")
+                    ref = order._data.get("reference", "No Ref")
+                    print(
+                        f"    PO Line ID: {line.pk}, Order Ref: {ref}, Status: {status}"
+                    )
                 except Exception as e:
                     print(f"    Error fetching order for PO line {line.pk}: {e}")
+
 
 if __name__ == "__main__":
     main()

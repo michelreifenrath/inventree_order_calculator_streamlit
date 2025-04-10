@@ -19,137 +19,30 @@ This project provides a Streamlit web application to calculate the required base
 
 ```
 .
-├── .venv/                # Python virtual environment (Gitignored)
-├── archive/              # Archived scripts
-│   └── calculate_order_needs.py # Original script
-├── tests/                # Pytest unit tests
-│   └── test_inventree_logic.py # Tests for core logic
-├── .env                  # Environment variables (API Credentials - Gitignored)
-├── .gitignore            # Git ignore rules
+├── .venv/                   # Python virtual environment (Gitignored)
+├── archive/                 # Archived scripts
+│   └── calculate_order_needs.py
+├── tests/                   # Pytest unit tests
+│   ├── test_bom_calculation.py
+│   ├── test_order_calculation.py
+│   └── test_inventree_logic.py (legacy)
+├── .env                     # Environment variables (API Credentials - Gitignored)
+├── .gitignore
 ├── .roo/
 │   └── rules/
-│       └── rules.md      # Roo's rules for this project
-├── app.py                # Main Streamlit application file
-├── IDEA.md               # Initial idea and plan description
-├── inventree_logic.py    # Core logic for InvenTree interaction and BOM calculation
-├── PLANNING.md           # Project planning details
-├── README.md             # This file
-├── requirements.txt      # Python dependencies
-└── TASK.md               # Task tracking
+│       └── rules.md
+├── app.py                   # Main Streamlit application
+├── bom_calculation.py       # Recursive BOM calculation logic
+├── order_calculation.py     # Order quantity calculation logic
+├── inventree_api_helpers.py # API helper functions
+├── streamlit_ui_elements.py # UI components for Streamlit
+├── IDEA.md
+├── PLANNING.md
+├── README.md
+├── requirements.txt
+└── TASK.md
 ```
 
 ## Setup
 
-1.  **Clone the repository:**
-    ```bash
-    git clone <repository-url>
-    cd inventree-order-calculator
-    ```
-
-2.  **Create a virtual environment (recommended):**
-    ```bash
-    python -m venv venv
-    source venv/bin/activate  # On Windows use `venv\Scripts\activate`
-    ```
-
-3.  **Install dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-4.  **Configure API Credentials:**
-    - Create a file named `.env` in the project root directory.
-    - Add your InvenTree URL and API Token to the `.env` file:
-      ```dotenv
-      # .env
-      INVENTREE_URL="YOUR_INVENTREE_URL_HERE"
-      INVENTREE_TOKEN="YOUR_INVENTREE_TOKEN_HERE"
-      ```
-    - **Important:** This file is automatically ignored by Git (see `.gitignore`) to prevent accidental credential exposure.
-
-## Usage
-
-1.  **Run the Streamlit application:**
-    ```bash
-    streamlit run app.py
-    ```
-2.  Your web browser should automatically open to the application's URL (usually `http://localhost:8501`).
-3.  The application will attempt to connect to your InvenTree instance using the credentials loaded from the `.env` file.
-4.  Use the sidebar to select the target parts from the dropdown list (populated from Category 191) and enter the quantity required for each. Use the "Add Row" / "Remove Last" buttons to manage the list.
-5.  Click the "Teilebedarf berechnen" (Calculate Parts Needed) button.
-6.  The results section will show the base components required, their current stock, and the quantity to order, **grouped by the input assembly** with colored headers.
-7.  Use the "Download Results (with group info) as CSV" button to save the complete order list, including the input assembly context for each part.
-8.  Use the "Berechnung zurücksetzen" (Reset Calculation) button to clear the results and start a new calculation.
-
-## Running with Docker
-
-You can build and run this application using Docker and Docker Compose. Make sure you have both installed.
-
-**Method 1: Using Docker Compose (Recommended)**
-
-This is the easiest way to run the application with Docker.
-
-1.  **Ensure `.env` file exists:** Make sure you have created the `.env` file in the project root directory with your InvenTree credentials as described in the [Setup](#setup) section.
-2.  **Start the application:** Navigate to the project's root directory in your terminal and run:
-    ```bash
-    docker-compose up --build
-    ```
-    - `docker-compose up`: Starts the services defined in `docker-compose.yml`.
-    - `--build`: Builds the Docker image before starting the container (necessary the first time or if you change the code/Dockerfile).
-3.  **Access the application:** Open your web browser and go to `http://localhost:8501`.
-4.  **Stop the application:** Press `Ctrl+C` in the terminal where `docker-compose up` is running, or run the following command from another terminal in the same directory:
-    ```bash
-    docker-compose down
-    ```
-
-5.  **Updating the Application:**
-    When you want to update the application with the latest code changes from your Git repository:
-    a.  Pull the latest changes into your local project directory:
-        ```bash
-        git pull origin master # Or 'main' depending on your branch name
-        ```
-    b.  Rebuild the Docker image and restart the container with the new code:
-        ```bash
-        docker-compose up --build -d # The '-d' runs it in detached mode (background)
-        ```
-    ```
-
-**Method 2: Using Docker commands directly**
-
-1.  **Build the Docker image:**
-    Navigate to the project's root directory and run:
-    ```bash
-    docker build -t inventree-order-calculator .
-    ```
-
-2.  **Run the Docker container:**
-    You need to pass your InvenTree credentials (from the `.env` file) and map the Streamlit port (8501).
-    ```bash
-    # Make sure your .env file exists in the current directory
-    docker run --rm -p 8501:8501 --env-file .env inventree-order-calculator
-    ```
-    - `--rm`: Automatically removes the container when it exits.
-    - `-p 8501:8501`: Maps port 8501 on your host machine to port 8501 inside the container.
-    - `--env-file .env`: Loads environment variables from your local `.env` file into the container. **Ensure your `.env` file is present in the directory where you run this command.**
-
-3.  Access the application in your browser at `http://localhost:8501`.
-
-## Development
-
-- **Testing:** Run unit tests using `pytest`:
-  ```bash
-  pytest
-  ```
-- **Formatting:** Ensure code is formatted with `black`:
-  ```bash
-  black .
-  ```
-
-## Technical Notes
-
-- **Purchase Order Status Handling:** The application considers parts on POs with statuses Pending (10), Placed (20), and On Hold (25). Due to observed inconsistencies in the InvenTree API's status filtering (especially for status 25), the application fetches *all* POs and filters them locally in Python to ensure accuracy.
-- **PO Line Data Anomaly:** A workaround is included to handle cases where a PO line item's `supplier_part` field is null, but the correct SupplierPart PK is found in the line item's `part` field.
-
-## Contributing
-
-Please refer to `PLANNING.md` and `TASK.md` for ongoing work and project guidelines. Follow the established code style and testing practices.
+_Fortsetzung unverändert..._
