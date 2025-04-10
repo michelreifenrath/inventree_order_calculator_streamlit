@@ -22,6 +22,7 @@ EXPOSE 8501
 # Define environment variable for Streamlit
 # Ensures Streamlit runs in headless mode correctly within Docker
 ENV STREAMLIT_SERVER_HEADLESS=true
+ENV PYTHONPATH=/app
 
 # Run app.py when the container launches
 # Use the array form to avoid shell processing issues
