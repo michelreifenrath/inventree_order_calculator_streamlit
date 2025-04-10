@@ -207,7 +207,7 @@ def render_results_table(results_list: Optional[List[Dict[str, Any]]]) -> None:
                 lambda po_list: (
                     ", ".join(
                         [
-                            f"{po.get('ref', '')} ({po.get('quantity', 0)} Stk, Status: {po.get('po_status', '')})"
+                            f"{po.get('po_ref', '')} ({po.get('quantity', 0)} Stk, Status: {po.get('po_status', '')})"
                             for po in po_list
                         ]
                     )
