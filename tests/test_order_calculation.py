@@ -4,13 +4,14 @@ from collections import defaultdict
 from src.order_calculation import calculate_required_parts
 
 # Mock data representing the output of get_final_part_data
+# CORRECTED: Use supplier_names list instead of supplier_name string
 MOCK_FINAL_PART_DATA = {
-    10: {"pk": 10, "name": "Resistor R1", "in_stock": 50.0, "is_template": False, "variant_stock": 0.0, "supplier_name": "Supplier A", "manufacturer_name": "Manu X"},
-    20: {"pk": 20, "name": "Capacitor C1", "in_stock": 100.0, "is_template": False, "variant_stock": 0.0, "supplier_name": "HAIP Solutions GmbH", "manufacturer_name": "Manu Y"},
-    30: {"pk": 30, "name": "IC U1", "in_stock": 10.0, "is_template": False, "variant_stock": 0.0, "supplier_name": "Supplier B", "manufacturer_name": "HAIP Solutions GmbH"}, # Test manufacturer exclusion
-    40: {"pk": 40, "name": "Diode D1", "in_stock": 200.0, "is_template": False, "variant_stock": 0.0, "supplier_name": "Supplier A", "manufacturer_name": "Manu X"},
-    50: {"pk": 50, "name": "Transistor Q1", "in_stock": 5.0, "is_template": False, "variant_stock": 0.0, "supplier_name": "HAIP Solutions GmbH", "manufacturer_name": "Manu Z"},
-    99: {"pk": 99, "name": "Assembly Top", "in_stock": 0.0, "is_template": True, "variant_stock": 0.0, "supplier_name": "", "manufacturer_name": ""}, # Root assembly
+    10: {"pk": 10, "name": "Resistor R1", "in_stock": 50.0, "is_template": False, "variant_stock": 0.0, "supplier_names": ["Supplier A"], "manufacturer_name": "Manu X"},
+    20: {"pk": 20, "name": "Capacitor C1", "in_stock": 100.0, "is_template": False, "variant_stock": 0.0, "supplier_names": ["HAIP Solutions GmbH", "Supplier C"], "manufacturer_name": "Manu Y"}, # Added another supplier
+    30: {"pk": 30, "name": "IC U1", "in_stock": 10.0, "is_template": False, "variant_stock": 0.0, "supplier_names": ["Supplier B"], "manufacturer_name": "HAIP Solutions GmbH"}, # Test manufacturer exclusion
+    40: {"pk": 40, "name": "Diode D1", "in_stock": 200.0, "is_template": False, "variant_stock": 0.0, "supplier_names": ["Supplier A"], "manufacturer_name": "Manu X"},
+    50: {"pk": 50, "name": "Transistor Q1", "in_stock": 5.0, "is_template": False, "variant_stock": 0.0, "supplier_names": ["HAIP Solutions GmbH"], "manufacturer_name": "Manu Z"},
+    99: {"pk": 99, "name": "Assembly Top", "in_stock": 0.0, "is_template": True, "variant_stock": 0.0, "supplier_names": [], "manufacturer_name": ""}, # Root assembly
 }
 
 # Mock data representing the *effect* of get_recursive_bom on required_base_components
@@ -33,10 +34,14 @@ MOCK_PO_DATA = {
 }
 
 # Adjusted stock levels to force ordering in tests
-ADJUSTED_MOCK_FINAL_PART_DATA = MOCK_FINAL_PART_DATA.copy()
-ADJUSTED_MOCK_FINAL_PART_DATA[10] = {**MOCK_FINAL_PART_DATA[10], 'in_stock': 2.0} # Req 5, Stock 2 -> Order 3
-ADJUSTED_MOCK_FINAL_PART_DATA[30] = {**MOCK_FINAL_PART_DATA[30], 'in_stock': 1.0} # Req 2, Stock 1 -> Order 1
-ADJUSTED_MOCK_FINAL_PART_DATA[50] = {**MOCK_FINAL_PART_DATA[50], 'in_stock': 0.0} # Req 1, Stock 0 -> Order 1
+# CORRECTED: Use supplier_names list
+ADJUSTED_MOCK_FINAL_PART_DATA = {}
+for pk, data in MOCK_FINAL_PART_DATA.items():
+    ADJUSTED_MOCK_FINAL_PART_DATA[pk] = data.copy() # Start with a copy
+
+ADJUSTED_MOCK_FINAL_PART_DATA[10]['in_stock'] = 2.0 # Req 5, Stock 2 -> Order 3
+ADJUSTED_MOCK_FINAL_PART_DATA[30]['in_stock'] = 1.0 # Req 2, Stock 1 -> Order 1
+ADJUSTED_MOCK_FINAL_PART_DATA[50]['in_stock'] = 0.0 # Req 1, Stock 0 -> Order 1
 
 
 def mock_get_bom_side_effect(api, part_id, quantity_needed, req_comps, root_id, tmpl_flags, encountered_ids):

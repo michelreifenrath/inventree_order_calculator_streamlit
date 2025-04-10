@@ -291,9 +291,10 @@ def calculate_required_parts(
     excluded_manufacturer_count = 0
 
     for part in final_list:
+        # Check if the excluded supplier is in the list of suppliers for this part
         supplier_match = (
             exclude_supplier_name
-            and part.get("supplier") == exclude_supplier_name
+            and exclude_supplier_name in part.get("supplier_names", []) # Check against the list
         )
         manufacturer_match = (
             exclude_manufacturer_name
