@@ -285,10 +285,42 @@ def calculate_required_parts(
         details["purchase_orders"] = part_po_data.get(part_id, [])
         final_list.append(details)
 
-    # Sort the final list (e.g., by name)
-    final_list.sort(key=lambda x: x["name"])
+    # --- Apply Exclusions ---
+    filtered_list = []
+    excluded_supplier_count = 0
+    excluded_manufacturer_count = 0
+
+    for part in final_list:
+        supplier_match = (
+            exclude_supplier_name
+            and part.get("supplier") == exclude_supplier_name
+        )
+        manufacturer_match = (
+            exclude_manufacturer_name
+            and part.get("manufacturer") == exclude_manufacturer_name
+        )
+
+        if supplier_match:
+            excluded_supplier_count += 1
+            logging.debug(f"Excluding part {part['pk']} due to supplier: {exclude_supplier_name}")
+            continue # Skip this part
+
+        if manufacturer_match:
+            excluded_manufacturer_count += 1
+            logging.debug(f"Excluding part {part['pk']} due to manufacturer: {exclude_manufacturer_name}")
+            continue # Skip this part
+
+        filtered_list.append(part)
+
+    if excluded_supplier_count > 0:
+        logging.info(f"Excluded {excluded_supplier_count} parts from supplier '{exclude_supplier_name}'.")
+    if excluded_manufacturer_count > 0:
+        logging.info(f"Excluded {excluded_manufacturer_count} parts from manufacturer '{exclude_manufacturer_name}'.")
+
+    # Sort the filtered list (e.g., by name)
+    filtered_list.sort(key=lambda x: x["name"])
 
     if progress_callback:
         progress_callback(100, "Berechnung abgeschlossen.")
-    logging.info(f"Calculation complete. Found {len(final_list)} parts to order.")
-    return final_list
+    logging.info(f"Calculation complete. Found {len(filtered_list)} parts to order after exclusions.")
+    return filtered_list
