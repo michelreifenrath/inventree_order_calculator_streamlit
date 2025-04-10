@@ -15,8 +15,8 @@ except ImportError:
         "Could not import SupplierPart/PurchaseOrder related classes. PO checks will be skipped."
     )
 
-from inventree_api_helpers import get_final_part_data, _chunk_list
-from bom_calculation import get_recursive_bom
+from src.inventree_api_helpers import get_final_part_data, _chunk_list # Absolute import
+from src.bom_calculation import get_recursive_bom # Absolute import
 
 # Define PO Status Map (copied from original logic)
 PO_STATUS_MAP = {

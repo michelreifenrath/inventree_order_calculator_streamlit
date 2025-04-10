@@ -9,7 +9,7 @@ import os  # Import os module
 from dotenv import load_dotenv  # Import load_dotenv
 
 # Importiere die refaktorierte Logik und UI Elemente
-from inventree_logic import (
+from src.inventree_logic import ( # Absolute import
     calculate_required_parts,
     # Functions needed for cache clearing are now in helpers, but might be needed if called directly elsewhere
     # If not called directly, they can be removed from here. Assuming they might be needed for reset.
@@ -17,14 +17,14 @@ from inventree_logic import (
     # get_bom_items,
     # get_final_part_data
 )
-from inventree_api_helpers import (
+from src.inventree_api_helpers import ( # Absolute import
     connect_to_inventree,  # Import from new location
     get_parts_in_category,  # Import from new location
     get_part_details,  # Needed for cache clearing
     get_bom_items,  # Needed for cache clearing
     get_final_part_data,  # Needed for cache clearing
 )
-from streamlit_ui_elements import (
+from src.streamlit_ui_elements import ( # Absolute import
     render_assembly_inputs,
     render_results_table,
 )  # Import UI functions
@@ -143,7 +143,7 @@ def reset_calculation() -> None:
     # Clear relevant caches
     try:
         # Clear caches from the correct module
-        from inventree_api_helpers import (
+        from src.inventree_api_helpers import ( # Absolute import
             get_part_details,
             get_bom_items,
             get_final_part_data,

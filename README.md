@@ -1,48 +1,122 @@
 # InvenTree Order Calculator
 
-This project provides a Streamlit web application to calculate the required base components needed to build a set of specified assembly parts, based on Bill of Materials (BOM) data fetched from an InvenTree instance. It determines the quantity of each base part to order by comparing the total required quantity against the current stock level in InvenTree.
+This project provides an interactive Streamlit web application to calculate the required base components needed to build a set of specified assembly parts, based on Bill of Materials (BOM) data fetched from an InvenTree instance. It determines the quantity of each base part to order by comparing the total required quantity against the current stock level (including parts on pending/placed purchase orders) in InvenTree.
 
 ## Features
 
-- Connects to a specified InvenTree instance using API credentials.
-- Allows users to select target parts from a predefined InvenTree category (currently Category 191) using a dropdown menu in the sidebar.
-- Users can define the desired quantity for each selected part.
-- Multiple parts can be added to the list.
+- Connects securely to a specified InvenTree instance using API credentials stored in a `.env` file.
+- Allows users to select target assembly parts from a dropdown menu (populated from a configurable InvenTree category).
+- Users can define the desired quantity for each selected assembly part.
+- Multiple assembly parts can be added to the calculation list.
 - Recursively calculates the total required quantity for each base component based on the BOMs of the target assemblies.
-- Fetches current stock levels for base components from InvenTree.
-- Displays the parts that need to be ordered, **grouped by the initial input assembly**, with color-highlighted headers for each group.
-- Allows downloading the **grouped order list** (including input assembly information) as a CSV file.
-- Uses Streamlit caching to optimize performance by reducing redundant API calls.
-- Includes parts currently on Purchase Orders with statuses "Pending" (10), "Placed" (20), or "On Hold" (25) in the stock availability calculation.
+- Fetches current stock levels and quantities on pending/placed purchase orders for base components from InvenTree.
+- Option to exclude parts based on specific Suppliers or Manufacturers.
+- Displays the final list of parts that need to be ordered, grouped by the initial input assembly, with clear quantity breakdowns.
+- Allows downloading the grouped order list (including input assembly information) as a CSV file.
+- Uses Streamlit caching (`@st.cache_data`, `@st.cache_resource`) to optimize performance by reducing redundant API calls.
+- Includes a "Restart Calculation" button to clear results and start over.
+- Dockerized for easy deployment and consistent environment (`Dockerfile`, `docker-compose.yml`).
 
 ## Project Structure
 
 ```
 .
+├── .dockerignore            # Files to ignore in Docker build context
+├── .env.example             # Example environment variables file
+├── .gitignore               # Git ignore rules
 ├── .venv/                   # Python virtual environment (Gitignored)
-├── archive/                 # Archived scripts
-│   └── calculate_order_needs.py
+├── archive/                 # Archived scripts (Gitignored)
+├── docu/                    # Documentation files (Gitignored)
+├── src/                     # Core application source code
+│   ├── app.py                   # Main Streamlit application entrypoint
+│   ├── bom_calculation.py       # Logic for recursive BOM calculation
+│   ├── inventree_api_helpers.py # Helper functions for InvenTree API interaction
+│   ├── inventree_logic.py       # Core logic coordination (legacy/refactored)
+│   ├── order_calculation.py     # Logic for calculating required order quantities
+│   └── streamlit_ui_elements.py # Reusable Streamlit UI components
 ├── tests/                   # Pytest unit tests
 │   ├── test_bom_calculation.py
 │   ├── test_order_calculation.py
-│   └── test_inventree_logic.py (legacy)
-├── .env                     # Environment variables (API Credentials - Gitignored)
-├── .gitignore
+│   ├── test_inventree_po.py     # (Potentially temporary/utility)
+│   └── validate_po_logic.py   # (Potentially temporary/utility)
 ├── .roo/
 │   └── rules/
-│       └── rules.md
-├── app.py                   # Main Streamlit application
-├── bom_calculation.py       # Recursive BOM calculation logic
-├── order_calculation.py     # Order quantity calculation logic
-├── inventree_api_helpers.py # API helper functions
-├── streamlit_ui_elements.py # UI components for Streamlit
-├── IDEA.md
-├── PLANNING.md
-├── README.md
-├── requirements.txt
-└── TASK.md
+│       └── rules.md         # Roo AI rules for this project
+├── docker-compose.yml       # Docker Compose configuration
+├── Dockerfile               # Docker build instructions
+├── PLANNING.md              # Project architecture and planning notes
+├── README.md                # This file
+├── requirements.txt         # Python dependencies
+└── TASK.md                  # Task tracking for development
 ```
 
-## Setup
+## Setup and Usage
 
-_Fortsetzung unverändert..._
+### 1. Prerequisites
+
+- Python 3.9+
+- Docker and Docker Compose (Optional, for containerized deployment)
+- Access to an InvenTree instance with API enabled.
+
+### 2. Clone the Repository
+
+```bash
+git clone <your-repository-url>
+cd inventree-order-calculator
+```
+
+### 3. Environment Variables
+
+- Copy the example environment file:
+  ```bash
+  cp .env.example .env
+  ```
+- Edit the `.env` file and add your InvenTree server URL and API token:
+  ```dotenv
+  INVENTREE_SERVER=https://your-inventree-instance.com
+  INVENTREE_API_TOKEN=your_api_token_here
+  # Optional: Specify the category ID for the assembly dropdown
+  TARGET_ASSEMBLY_CATEGORY_ID=191
+  ```
+  **Important:** Ensure the `.env` file is listed in your `.gitignore` to prevent committing secrets.
+
+### 4. Install Dependencies
+
+- Create and activate a virtual environment (recommended):
+  ```bash
+  python -m venv .venv
+  # On Windows
+  .\.venv\Scripts\activate
+  # On macOS/Linux
+  source .venv/bin/activate
+  ```
+- Install the required Python packages:
+  ```bash
+  pip install -r requirements.txt
+  ```
+
+### 5. Running the Application
+
+#### Option A: Locally with Streamlit
+
+```bash
+streamlit run src/app.py
+```
+The application should open automatically in your web browser.
+
+#### Option B: Using Docker Compose
+
+```bash
+docker-compose up --build
+```
+Access the application at `http://localhost:8501` in your web browser.
+
+## Running Tests
+
+Ensure you have installed the development dependencies (including `pytest`).
+
+```bash
+pytest tests/
+```
+
+This will discover and run all unit tests in the `tests` directory.

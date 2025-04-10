@@ -2,7 +2,7 @@ import logging
 from collections import defaultdict
 from typing import Optional, Set
 from inventree.api import InvenTreeAPI
-from inventree_api_helpers import get_part_details, get_bom_items
+from src.inventree_api_helpers import get_part_details, get_bom_items # Absolute import
 
 
 def get_recursive_bom(

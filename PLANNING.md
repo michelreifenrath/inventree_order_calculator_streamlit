@@ -31,23 +31,32 @@
 
 ```
 .
-├── .venv/                # Python virtual environment (Gitignored)
-├── archive/              # Archived scripts
-│   └── calculate_order_needs.py # Original script
-├── tests/                # Pytest unit tests
-│   └── test_inventree_logic.py # Tests for core logic
-├── .env                  # Environment variables (API Credentials - Gitignored)
-├── .gitignore            # Git ignore rules
+├── .dockerignore            # Files to ignore in Docker build context
+├── .env.example             # Example environment variables file
+├── .gitignore               # Git ignore rules
+├── .venv/                   # Python virtual environment (Gitignored)
+├── archive/                 # Archived scripts (Gitignored)
+├── docu/                    # Documentation files (Gitignored)
+├── src/                     # Core application source code
+│   ├── app.py                   # Main Streamlit application entrypoint
+│   ├── bom_calculation.py       # Logic for recursive BOM calculation
+│   ├── inventree_api_helpers.py # Helper functions for InvenTree API interaction
+│   ├── inventree_logic.py       # Core logic coordination (legacy/refactored)
+│   ├── order_calculation.py     # Logic for calculating required order quantities
+│   └── streamlit_ui_elements.py # Reusable Streamlit UI components
+├── tests/                   # Pytest unit tests
+│   ├── test_bom_calculation.py
+│   ├── test_order_calculation.py
+│   └── ... (other test files)
 ├── .roo/
 │   └── rules/
-│       └── rules.md      # Roo's rules for this project
-├── app.py                # Main Streamlit application file
-├── IDEA.md               # Initial idea and plan description
-├── inventree_logic.py    # Core logic for InvenTree interaction and BOM calculation
-├── PLANNING.md           # This file
-├── README.md             # Project overview and setup instructions
-├── requirements.txt      # Python dependencies
-└── TASK.md               # Task tracking
+│       └── rules.md         # Roo AI rules for this project
+├── docker-compose.yml       # Docker Compose configuration
+├── Dockerfile               # Docker build instructions
+├── PLANNING.md              # This file
+├── README.md                # Project overview and setup instructions
+├── requirements.txt         # Python dependencies
+└── TASK.md                  # Task tracking
 ```
 
 ## 4. Style & Conventions

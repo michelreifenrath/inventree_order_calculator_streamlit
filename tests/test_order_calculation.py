@@ -1,5 +1,5 @@
 import pytest
-from order_calculation import calculate_required_parts
+from src.order_calculation import calculate_required_parts # Import from src
 
 
 class DummyAPI:

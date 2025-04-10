@@ -25,4 +25,4 @@ ENV STREAMLIT_SERVER_HEADLESS=true
 
 # Run app.py when the container launches
 # Use the array form to avoid shell processing issues
-CMD ["streamlit", "run", "app.py"]
+CMD ["streamlit", "run", "src/app.py"]

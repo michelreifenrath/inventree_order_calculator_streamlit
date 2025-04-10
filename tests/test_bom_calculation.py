@@ -1,6 +1,6 @@
 import pytest
 from collections import defaultdict
-from bom_calculation import get_recursive_bom
+from src.bom_calculation import get_recursive_bom # Import from src
 
 
 class DummyAPI:
