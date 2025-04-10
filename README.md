@@ -24,9 +24,6 @@ This project provides an interactive Streamlit web application to calculate the 
 ├── .dockerignore            # Files to ignore in Docker build context
 ├── .env.example             # Example environment variables file
 ├── .gitignore               # Git ignore rules
-├── .venv/                   # Python virtual environment (Gitignored)
-├── archive/                 # Archived scripts (Gitignored)
-├── docu/                    # Documentation files (Gitignored)
 ├── src/                     # Core application source code
 │   ├── app.py                   # Main Streamlit application entrypoint
 │   ├── bom_calculation.py       # Logic for recursive BOM calculation
@@ -39,9 +36,6 @@ This project provides an interactive Streamlit web application to calculate the 
 │   ├── test_order_calculation.py
 │   ├── test_inventree_po.py     # (Potentially temporary/utility)
 │   └── validate_po_logic.py   # (Potentially temporary/utility)
-├── .roo/
-│   └── rules/
-│       └── rules.md         # Roo AI rules for this project
 ├── docker-compose.yml       # Docker Compose configuration
 ├── Dockerfile               # Docker build instructions
 ├── PLANNING.md              # Project architecture and planning notes
@@ -71,24 +65,22 @@ cd inventree-order-calculator
   ```bash
   cp .env.example .env
   ```
-- Edit the `.env` file and add your InvenTree server URL and API token:
   ```dotenv
   INVENTREE_SERVER=https://your-inventree-instance.com
   INVENTREE_API_TOKEN=your_api_token_here
   # Optional: Specify the category ID for the assembly dropdown
   TARGET_ASSEMBLY_CATEGORY_ID=191
   ```
-  **Important:** Ensure the `.env` file is listed in your `.gitignore` to prevent committing secrets.
 
 ### 4. Install Dependencies
 
 - Create and activate a virtual environment (recommended):
   ```bash
-  python -m venv .venv
+  python -m venv <your_virtual_env_name> # e.g., venv
   # On Windows
-  .\.venv\Scripts\activate
+  .\<your_virtual_env_name>\Scripts\activate
   # On macOS/Linux
-  source .venv/bin/activate
+  source <your_virtual_env_name>/bin/activate
   ```
 - Install the required Python packages:
   ```bash
