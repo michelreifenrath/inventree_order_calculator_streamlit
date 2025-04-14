@@ -6,7 +6,7 @@ Exports:
     - calculate_required_parts
 """
 
-from src.bom_calculation import get_recursive_bom # Absolute import
-from src.order_calculation import calculate_required_parts # Absolute import
+from bom_calculation import get_recursive_bom # Relative import
+from order_calculation import calculate_required_parts # Relative import
 
 __all__ = ["get_recursive_bom", "calculate_required_parts"]

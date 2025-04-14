@@ -139,7 +139,7 @@ def calculate_required_parts(
     exclude_supplier_name: Optional[str] = None,
     exclude_manufacturer_name: Optional[str] = None,
     progress_callback: Optional[Callable[[int, str], None]] = None,
-) -> List[Dict[str, any]]:
+) -> tuple[List[Dict[str, any]], List[Dict[str, any]]]:
     """
     Calculates the list of parts to order based on target assemblies,
     with options to exclude by supplier or manufacturer.
@@ -160,17 +160,23 @@ def calculate_required_parts(
         logging.error(
             "Cannot calculate parts: InvenTree API connection is not available."
         )
-        return []
+        return [], []
     if not target_assemblies:
         logging.info("No target assemblies provided.")
-        return []
+        return [], []
 
     logging.info(f"Calculating required components for targets: {target_assemblies}")
     required_base_components: defaultdict[int, defaultdict[int, float]] = defaultdict(
         lambda: defaultdict(float)
     )
+    # Dictionary to track required sub-assemblies
+    required_sub_assemblies: defaultdict[int, defaultdict[int, float]] = defaultdict(
+        lambda: defaultdict(float)
+    )
     template_only_flags: defaultdict[int, bool] = defaultdict(bool)
     all_encountered_part_ids: Set[int] = set()
+    # Set to track which parts are assemblies
+    assembly_part_ids: Set[int] = set()
 
     root_assembly_ids = tuple(target_assemblies.keys())
     # Fetch root assembly names early for progress callback
@@ -187,6 +193,7 @@ def calculate_required_parts(
             )
             progress_callback(current_progress, progress_text)
         try:
+            # Pass the assembly_part_ids set to track assemblies
             get_recursive_bom(
                 api,
                 int(part_id),
@@ -195,7 +202,10 @@ def calculate_required_parts(
                 int(part_id),
                 template_only_flags,
                 all_encountered_part_ids,
+                required_sub_assemblies,  # Pass the sub_assemblies dictionary
             )
+            # Add the root assembly to the assembly set
+            assembly_part_ids.add(int(part_id))
         except Exception as e:
             logging.error(f"Error processing assembly {part_id}: {e}", exc_info=True)
             continue
@@ -208,7 +218,7 @@ def calculate_required_parts(
 
     if not total_required_quantities:
         logging.info("No base components found after BOM processing. Nothing to order.")
-        return []
+        return [], []
 
     # --- Fetch Details for All Encountered Parts ---
     if progress_callback:
@@ -216,11 +226,23 @@ def calculate_required_parts(
     all_encountered_part_ids.update(root_assembly_ids)
     final_part_data = get_final_part_data(api, tuple(all_encountered_part_ids))
 
+    # --- Identify Sub-Assemblies ---
+    # Collect all assemblies that are not root assemblies
+    for part_id, part_data in final_part_data.items():
+        if part_data.get("assembly", False) and part_id not in root_assembly_ids:
+            assembly_part_ids.add(part_id)
+
     # --- Calculate Stock, Order Need, and Collect Assembly Usage ---
     if progress_callback:
         progress_callback(60, "Calculating stock and order amounts...")
     parts_to_order_details = {} # Store final details here {part_id: {details}}
     part_available_stock_map = {} # Store calculated available stock
+
+    # --- Log Sub-Assembly Requirements ---
+    # Log the sub-assemblies that were identified during BOM traversal
+    logging.info(f"Assembly part IDs: {assembly_part_ids}")
+    logging.info(f"Root assembly IDs: {root_assembly_ids}")
+    logging.info(f"Sub-assemblies from BOM traversal: {dict(required_sub_assemblies)}")
 
     for part_id, total_required in total_required_quantities.items():
         part_data = final_part_data.get(part_id)
@@ -321,7 +343,58 @@ def calculate_required_parts(
     # Sort the filtered list (e.g., by name)
     filtered_list.sort(key=lambda x: x["name"])
 
+    # --- Prepare Sub-Assembly List ---
+    sub_assembly_list = []
+
+    # Log the contents of required_sub_assemblies for debugging
+    logging.info(f"Required sub-assemblies: {dict(required_sub_assemblies)}")
+
+    # Process the sub-assemblies that were collected during BOM traversal
+    for root_id, sub_assemblies in required_sub_assemblies.items():
+        root_assembly_name = final_part_data.get(root_id, {}).get(
+            "name", f"Unknown Assembly (ID: {root_id})"
+        )
+
+        for sub_id, qty in sub_assemblies.items():
+            # Get the sub-assembly name
+            sub_name = final_part_data.get(sub_id, {}).get("name", f"Unknown (ID: {sub_id})")
+            logging.info(f"Adding sub-assembly to list: {sub_name} (ID: {sub_id}) x{qty} for {root_assembly_name}")
+
+            # Get stock information for this sub-assembly
+            sub_part_data = final_part_data.get(sub_id, {})
+            in_stock = sub_part_data.get("in_stock", 0.0)
+            is_template = sub_part_data.get("is_template", False)
+            variant_stock = sub_part_data.get("variant_stock", 0.0)
+
+            # Calculate available stock
+            template_only = template_only_flags.get(sub_id, False)
+            if template_only:
+                total_available_stock = in_stock
+            elif is_template:
+                total_available_stock = in_stock + variant_stock
+            else:
+                total_available_stock = in_stock
+
+            # Calculate how many need to be built
+            to_build = max(0, qty - total_available_stock)
+
+            sub_assembly_list.append({
+                "pk": sub_id,
+                "name": sub_name,
+                "quantity": round(qty, 3),
+                "available_stock": round(total_available_stock, 3),
+                "to_build": round(to_build, 3),
+                "for_assembly": root_assembly_name,
+                "for_assembly_id": root_id
+            })
+
+    # Sort the sub-assembly list by name
+    sub_assembly_list.sort(key=lambda x: x["name"])
+
+    # Count how many sub-assemblies need to be built
+    sub_assemblies_to_build = sum(1 for item in sub_assembly_list if item["to_build"] > 0)
+
     if progress_callback:
         progress_callback(100, "Berechnung abgeschlossen.")
-    logging.info(f"Calculation complete. Found {len(filtered_list)} parts to order after exclusions.")
-    return filtered_list
+    logging.info(f"Calculation complete. Found {len(filtered_list)} parts to order and {len(sub_assembly_list)} sub-assemblies (of which {sub_assemblies_to_build} need to be built).")
+    return filtered_list, sub_assembly_list

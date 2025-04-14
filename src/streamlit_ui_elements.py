@@ -166,6 +166,144 @@ def render_results_table(results_list: Optional[List[Dict[str, Any]]]) -> None:
         results_list: The list of dictionaries containing parts to order,
                       or None if no calculation has been run or an error occurred.
     """
+    render_parts_to_order_table(results_list)
+
+
+def render_sub_assemblies_table(sub_assemblies_list: Optional[List[Dict[str, Any]]]) -> None:
+    """
+    Renders a table showing required sub-assemblies.
+
+    Args:
+        sub_assemblies_list: The list of dictionaries containing sub-assemblies to build,
+                            or None if no calculation has been run or an error occurred.
+    """
+    import pandas as pd  # Import pandas locally within the function
+
+    st.header("🔧 Benötigte Unterbaugruppen")
+
+    if sub_assemblies_list is not None:
+        if len(sub_assemblies_list) > 0:
+            # Create DataFrame from sub-assemblies list
+            df_full = pd.DataFrame(sub_assemblies_list)
+
+            # Defensive check: Ensure DataFrame is not empty and has required columns
+            required_cols = {"pk", "name", "quantity", "available_stock", "to_build", "for_assembly"}
+
+            if df_full.empty or not required_cols.issubset(df_full.columns):
+                st.error(
+                    "Interner Fehler: Daten für Unterbaugruppen sind ungültig oder unvollständig."
+                )
+                log.error(
+                    f"Invalid DataFrame created from sub_assemblies_list. Columns: {df_full.columns}. Missing: {required_cols - set(df_full.columns)}"
+                )
+                return  # Stop rendering if data is bad
+
+            # Create URL column for linking
+            base_url = "https://lager.haip.solutions/"
+            df_full["Part URL"] = df_full["pk"].apply(
+                lambda pk: f"{base_url}platform/part/{pk}/"
+            )
+
+            # Select columns for display
+            display_columns_ordered = [
+                "name",
+                "Part URL",  # Hidden link column
+                "quantity",
+                "available_stock",
+                "to_build",
+                "for_assembly",
+            ]
+            df_display = df_full[
+                [col for col in display_columns_ordered if col in df_full.columns]
+            ]
+
+            # Update column headers
+            df_display.columns = [
+                "Name",
+                "Part ID",  # Header for the URL column
+                "Benötigt",
+                "Auf Lager",
+                "Zu bauen",
+                "Für Assembly",
+            ]
+
+            # Configure columns for st.data_editor
+            column_config = {
+                "Name": st.column_config.TextColumn(width="large"),
+                "Part ID": st.column_config.LinkColumn(
+                    display_text=r"https://lager.haip.solutions/platform/part/(\d+)/",
+                    validate=r"^https://lager.haip.solutions/platform/part/\d+/$",
+                    help="Klicken, um die Unterbaugruppe in InvenTree zu öffnen",
+                    width="small",
+                ),
+                "Benötigt": st.column_config.NumberColumn(format="%.2f", width="small"),
+                "Auf Lager": st.column_config.NumberColumn(format="%.2f", width="small"),
+                "Zu bauen": st.column_config.NumberColumn(format="%.2f", width="small", help="Anzahl, die gebaut werden muss (Benötigt - Auf Lager)"),
+                "Für Assembly": st.column_config.TextColumn(width="large"),
+            }
+
+            st.data_editor(
+                df_display,
+                column_config=column_config,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            # CSV Download
+            csv_columns_ordered = [
+                "pk",
+                "name",
+                "quantity",
+                "available_stock",
+                "to_build",
+                "for_assembly",
+                "for_assembly_id",
+            ]
+            df_csv = df_full[
+                [col for col in csv_columns_ordered if col in df_full.columns]
+            ]
+
+            # Use consistent headers
+            df_csv.columns = [
+                "Part ID",
+                "Name",
+                "Benötigt",
+                "Auf Lager",
+                "Zu bauen",
+                "Für Assembly",
+                "Assembly ID",
+            ]
+
+            try:
+                csv_data = df_csv.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    label="💾 Unterbaugruppen als CSV herunterladen",
+                    data=csv_data,
+                    file_name="inventree_sub_assemblies.csv",
+                    mime="text/csv",
+                )
+            except Exception as e:
+                st.error(f"Fehler beim Erstellen der CSV-Datei: {e}")
+                log.error("Error generating CSV data for sub-assemblies", exc_info=True)
+
+        else:
+            # Handle case where calculation succeeded but yielded an empty list
+            st.info(
+                "👍 Keine Unterbaugruppen benötigt."
+            )
+    else:
+        # No results calculated yet
+        st.info("Klicke auf 'Teilebedarf berechnen', um die Ergebnisse anzuzeigen.")
+
+
+def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) -> None:
+    """
+    Renders the table of parts to order and CSV download button.
+
+    Args:
+        results_list: The list of dictionaries containing parts to order,
+                      or None if no calculation has been run or an error occurred.
+    """
     import pandas as pd  # Import pandas locally within the function
 
     st.header("📋 Ergebnisse: Benötigte Teile")

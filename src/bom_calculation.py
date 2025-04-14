@@ -13,6 +13,7 @@ def get_recursive_bom(
     root_input_id: int,
     template_only_flags: defaultdict[int, bool],
     all_encountered_part_ids: Set[int],
+    sub_assemblies: defaultdict[int, defaultdict[int, float]] = None,
 ) -> None:
     """
     Recursively processes the BOM using cached data fetching functions.
@@ -35,6 +36,10 @@ def get_recursive_bom(
     if not part_details:
         logging.warning(f"Skipping part ID {part_id} due to fetch error in recursion.")
         return
+
+    # Initialize sub_assemblies if not provided
+    if sub_assemblies is None:
+        sub_assemblies = defaultdict(lambda: defaultdict(float))
 
     if part_details.get("assembly", False):
         logging.debug(
@@ -65,16 +70,52 @@ def get_recursive_bom(
                         sub_part_id
                     ] += total_sub_quantity
                 elif is_assembly:
-                    # Reason: Recursion for nested assemblies
-                    get_recursive_bom(
-                        api,
-                        sub_part_id,
-                        total_sub_quantity,
-                        required_components,
-                        root_input_id,
-                        template_only_flags,
-                        all_encountered_part_ids,
+                    # This is a sub-assembly
+                    # First, add it to the sub_assemblies dictionary
+                    logging.debug(
+                        f"Found sub-assembly: {sub_part_details.get('name')} (ID: {sub_part_id}) for root {root_input_id}, Qty: {total_sub_quantity}"
                     )
+                    # Add to sub-assemblies tracking
+                    sub_assemblies[root_input_id][sub_part_id] += total_sub_quantity
+
+                    # Check if we have stock of this sub-assembly
+                    in_stock = sub_part_details.get("in_stock", 0.0)
+                    is_template = sub_part_details.get("is_template", False)
+                    variant_stock = sub_part_details.get("variant_stock", 0.0)
+
+                    # Calculate available stock
+                    template_only = template_only_flags.get(sub_part_id, False)
+                    if template_only:
+                        available_stock = in_stock
+                    elif is_template:
+                        available_stock = in_stock + variant_stock
+                    else:
+                        available_stock = in_stock
+
+                    # Calculate how many need to be built
+                    to_build = max(0, total_sub_quantity - available_stock)
+
+                    logging.debug(
+                        f"Sub-assembly {sub_part_details.get('name')} (ID: {sub_part_id}): Need {total_sub_quantity}, Available {available_stock}, To Build {to_build}"
+                    )
+
+                    # Only process BOM for the quantity that needs to be built
+                    if to_build > 0:
+                        # Then, recursively process its BOM to get its components, but only for the quantity that needs to be built
+                        get_recursive_bom(
+                            api,
+                            sub_part_id,
+                            to_build,  # Only process the quantity that needs to be built
+                            required_components,
+                            root_input_id,
+                            template_only_flags,
+                            all_encountered_part_ids,
+                            sub_assemblies,
+                        )
+                    else:
+                        logging.debug(
+                            f"Skipping BOM processing for sub-assembly {sub_part_details.get('name')} (ID: {sub_part_id}) as sufficient stock is available"
+                        )
                 else:
                     logging.debug(
                         f"Adding base component: {sub_part_details.get('name')} (ID: {sub_part_id}), Qty: {total_sub_quantity}"

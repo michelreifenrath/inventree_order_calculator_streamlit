@@ -9,7 +9,7 @@ import os  # Import os module
 from dotenv import load_dotenv  # Import load_dotenv
 
 # Importiere die refaktorierte Logik und UI Elemente
-from src.inventree_logic import ( # Absolute import
+from inventree_logic import ( # Relative import
     calculate_required_parts,
     # Functions needed for cache clearing are now in helpers, but might be needed if called directly elsewhere
     # If not called directly, they can be removed from here. Assuming they might be needed for reset.
@@ -17,16 +17,17 @@ from src.inventree_logic import ( # Absolute import
     # get_bom_items,
     # get_final_part_data
 )
-from src.inventree_api_helpers import ( # Absolute import
+from inventree_api_helpers import ( # Relative import
     connect_to_inventree,  # Import from new location
     get_parts_in_category,  # Import from new location
     get_part_details,  # Needed for cache clearing
     get_bom_items,  # Needed for cache clearing
     get_final_part_data,  # Needed for cache clearing
 )
-from src.streamlit_ui_elements import ( # Absolute import
+from streamlit_ui_elements import ( # Relative import
     render_assembly_inputs,
     render_results_table,
+    render_sub_assemblies_table,
 )  # Import UI functions
 
 # --- Streamlit App Konfiguration ---
@@ -122,6 +123,9 @@ if "target_assemblies" not in st.session_state:
 if "results" not in st.session_state:
     st.session_state.results = None  # Hier speichern wir die Berechnungsergebnisse
 
+if "sub_assemblies" not in st.session_state:
+    st.session_state.sub_assemblies = None  # Hier speichern wir die Unterbaugruppen
+
 # --- Render UI für Eingaben (Target Assemblies) using the imported function ---
 render_assembly_inputs(
     part_names=part_names,
@@ -140,10 +144,11 @@ st.header("⚙️ Berechnung & Filter")
 def reset_calculation() -> None:
     """Clears the calculation results stored in the session state."""
     st.session_state.results = None
+    st.session_state.sub_assemblies = None
     # Clear relevant caches
     try:
         # Clear caches from the correct module
-        from src.inventree_api_helpers import ( # Absolute import
+        from inventree_api_helpers import ( # Relative import
             get_part_details,
             get_bom_items,
             get_final_part_data,
@@ -243,7 +248,7 @@ if calculate_pressed:
             )
 
             # Call the core logic with both exclusion parameters
-            parts_to_order = calculate_required_parts(
+            parts_to_order, sub_assemblies = calculate_required_parts(
                 api,
                 targets_dict,
                 exclude_supplier_name=supplier_to_exclude_arg,  # Pass supplier exclusion
@@ -251,14 +256,24 @@ if calculate_pressed:
                 progress_callback=update_progress,
             )
             # Correct indentation for this block
-            st.session_state.results = (
-                parts_to_order  # Speichere Ergebnisse im Session State
-            )
-            if not parts_to_order:
-                st.success("✅ Alle benötigten Komponenten sind ausreichend auf Lager.")
+            st.session_state.results = parts_to_order  # Speichere Ergebnisse im Session State
+            st.session_state.sub_assemblies = sub_assemblies  # Speichere Unterbaugruppen im Session State
+            # Count how many sub-assemblies need to be built
+            sub_assemblies_to_build = sum(1 for item in sub_assemblies if item.get("to_build", 0) > 0)
+
+            if not parts_to_order and sub_assemblies_to_build == 0:
+                st.success("✅ Alle benötigten Komponenten und Unterbaugruppen sind ausreichend auf Lager.")
+            elif not parts_to_order:
+                st.success(
+                    f"✅ Berechnung abgeschlossen. Alle Komponenten sind auf Lager, aber {sub_assemblies_to_build} Unterbaugruppen müssen gebaut werden."
+                )
+            elif sub_assemblies_to_build == 0:
+                st.success(
+                    f"✅ Berechnung abgeschlossen. {len(parts_to_order)} Teile müssen bestellt werden. Alle benötigten Unterbaugruppen sind auf Lager."
+                )
             else:
                 st.success(
-                    f"✅ Berechnung abgeschlossen. {len(parts_to_order)} Teile müssen bestellt werden."
+                    f"✅ Berechnung abgeschlossen. {len(parts_to_order)} Teile müssen bestellt werden und {sub_assemblies_to_build} Unterbaugruppen müssen gebaut werden."
                 )
 
         except Exception as e:
@@ -268,14 +283,16 @@ if calculate_pressed:
                 "Fehler während calculate_required_parts in Streamlit App:",
                 exc_info=True,
             )
-            st.session_state.results = (
-                None  # Setze Ergebnisse bei Fehler zurück (Unindented)
-            )
+            st.session_state.results = None  # Setze Ergebnisse bei Fehler zurück
+            st.session_state.sub_assemblies = None  # Setze Unterbaugruppen bei Fehler zurück
 
 
 # --- Ergebnisse anzeigen ---
-# Call the function from the UI elements module to render the results
+# Call the functions from the UI elements module to render the results
 render_results_table(st.session_state.get("results"))
+
+# Render the sub-assemblies table
+render_sub_assemblies_table(st.session_state.get("sub_assemblies"))
 
 # Optional: Auto-refresh (siehe IDEA.md für Details zur Implementierung)
 # from streamlit_autorefresh import st_autorefresh
