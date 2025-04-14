@@ -29,10 +29,15 @@ from streamlit_ui_elements import ( # Relative import
     render_results_table,
     render_sub_assemblies_table,
 )  # Import UI functions
+from database_helpers import init_db
+from streamlit_ui_elements import render_save_load_controls
 
 # --- Streamlit App Konfiguration ---
 st.set_page_config(page_title="InvenTree Order Calculator", layout="wide")
 st.title("📊 InvenTree Order Calculator")
+
+# Initialisiere die Datenbank
+init_db()
 
 # --- Konstanten ---
 TARGET_CATEGORY_ID = 191  # ID der Zielkategorie für die Teileauswahl
@@ -135,6 +140,8 @@ render_assembly_inputs(
     target_category_id=TARGET_CATEGORY_ID,
 )
 
+# Füge die Speicher/Laden Kontrollen hinzu
+render_save_load_controls()
 
 # --- Berechnungs- und Reset-Buttons ---
 st.header("⚙️ Berechnung & Filter")

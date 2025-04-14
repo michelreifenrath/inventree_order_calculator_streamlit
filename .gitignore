@@ -149,3 +149,6 @@ Thumbs.db
 
 # Roo / Cline settings
 .roo/
+
+# SQLite database
+data/*.db

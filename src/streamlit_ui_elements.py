@@ -2,6 +2,12 @@
 import streamlit as st
 import logging
 from typing import List, Dict, Optional, Any
+from database_helpers import (
+    save_current_assemblies,
+    load_saved_assemblies,
+    get_saved_assembly_names,
+    delete_saved_assembly
+)
 
 log = logging.getLogger(__name__)
 
@@ -463,3 +469,45 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
     else:
         # No results calculated yet
         st.info("Klicke auf 'Teilebedarf berechnen', um die Ergebnisse anzuzeigen.")
+
+
+def render_save_load_controls() -> None:
+    """Render UI controls for saving and loading assembly selections."""
+    st.sidebar.header("💾 Baugruppen speichern/laden")
+    
+    # Save current selection
+    with st.sidebar.expander("Aktuelle Auswahl speichern", expanded=False):
+        save_name = st.text_input(
+            "Name für aktuelle Auswahl:",
+            key="save_name",
+            placeholder="z.B. Projekt A"
+        )
+        if st.button("Speichern", use_container_width=True, key="save_button"):
+            if save_name:
+                if save_current_assemblies(save_name):
+                    st.success(f"Baugruppen-Auswahl '{save_name}' erfolgreich gespeichert!")
+            else:
+                st.warning("Bitte einen Namen eingeben!")
+    
+    # Load saved selection
+    saved_names = get_saved_assembly_names()
+    if saved_names:
+        with st.sidebar.expander("Gespeicherte Auswahl laden", expanded=False):
+            selected_save = st.selectbox(
+                "Gespeicherte Konfiguration:",
+                options=saved_names,
+                key="load_selection"
+            )
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Laden", use_container_width=True):
+                    if load_saved_assemblies(selected_save):
+                        st.success(f"Baugruppen-Auswahl '{selected_save}' geladen!")
+                        st.rerun()  # Füge rerun() direkt nach dem erfolgreichen Laden hinzu
+            with col2:
+                if st.button("Löschen", use_container_width=True):
+                    if delete_saved_assembly(selected_save):
+                        st.success(f"Konfiguration '{selected_save}' gelöscht!")
+                        st.rerun()
+    else:
+        st.sidebar.info("Keine gespeicherten Konfigurationen vorhanden.")
