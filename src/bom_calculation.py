@@ -13,8 +13,9 @@ def get_recursive_bom(
     root_input_id: int,
     template_only_flags: defaultdict[int, bool],
     all_encountered_part_ids: Set[int],
-    sub_assemblies: defaultdict[int, defaultdict[int, float]] = None,
-    include_consumables: bool = True,  # New parameter
+    sub_assemblies: Optional[defaultdict[int, defaultdict[int, float]]] = None,
+    include_consumables: bool = True,
+    bom_consumable_status: Optional[dict[int, bool]] = None, # Track BOM line consumable status
 ) -> None:
     """
     Recursively processes the BOM using cached data fetching functions.
@@ -29,6 +30,7 @@ def get_recursive_bom(
         all_encountered_part_ids (set[int]): Set to collect all encountered part IDs.
         sub_assemblies (defaultdict): Tracks sub-assemblies needed for each root.
         include_consumables (bool): If False, quantities for parts marked 'consumable' are ignored.
+        bom_consumable_status (dict): Tracks if a part was marked consumable on any BOM line.
 
     Returns:
         None
@@ -44,6 +46,10 @@ def get_recursive_bom(
     if sub_assemblies is None:
         sub_assemblies = defaultdict(lambda: defaultdict(float))
 
+    # Initialize bom_consumable_status if it's the first call
+    if bom_consumable_status is None:
+        bom_consumable_status = {}
+
     if part_details.get("assembly", False):
         logging.debug(
             f"Processing assembly: {part_details.get('name')} (ID: {part_id}), Quantity: {quantity}"
@@ -55,6 +61,11 @@ def get_recursive_bom(
                 all_encountered_part_ids.add(sub_part_id)
                 sub_quantity_per = item["quantity"]
                 allow_variants = item["allow_variants"]
+                # Check the consumable status *on the BOM line itself*
+                is_bom_item_consumable = item.get("consumable", False)
+                # Update the tracking dictionary
+                bom_consumable_status[sub_part_id] = bom_consumable_status.get(sub_part_id, False) or is_bom_item_consumable
+
                 total_sub_quantity = quantity * sub_quantity_per
                 sub_part_details = get_part_details(api, sub_part_id)
                 if not sub_part_details:
@@ -64,19 +75,21 @@ def get_recursive_bom(
                     continue
                 is_template = sub_part_details.get("is_template", False)
                 is_assembly = sub_part_details.get("assembly", False)
-                is_consumable = sub_part_details.get("consumable", False) # Check if the sub-part is consumable
+                # Note: The part's own consumable flag (is_part_consumable) is still relevant for quantity calculation if include_consumables=False
+                is_part_consumable = sub_part_details.get("consumable", False)
 
                 if is_template and not allow_variants:
                     template_only_flags[sub_part_id] = True
                     logging.debug(
-                        f"Template component (variants disallowed): {sub_part_details.get('name')} (ID: {sub_part_id}), Qty: {total_sub_quantity}, Consumable: {is_consumable}"
+                        f"Template component (variants disallowed): {sub_part_details.get('name')} (ID: {sub_part_id}), Qty: {total_sub_quantity}, PartConsumable: {is_part_consumable}, BomItemConsumable: {is_bom_item_consumable}"
                     )
-                    if include_consumables or not is_consumable:
+                    # Quantity calculation depends on the part's consumable flag and the include_consumables setting
+                    if include_consumables or not is_part_consumable:
                         required_components[root_input_id][
                             sub_part_id
                         ] += total_sub_quantity
                     else:
-                        logging.debug(f"Ignoring consumable template quantity for {sub_part_id}")
+                        logging.debug(f"Ignoring part-consumable template quantity for {sub_part_id}")
                 elif is_assembly:
                     # This is a sub-assembly
                     # First, add it to the sub_assemblies dictionary
@@ -121,7 +134,8 @@ def get_recursive_bom(
                             template_only_flags,
                             all_encountered_part_ids,
                             sub_assemblies,
-                            include_consumables, # Pass parameter down
+                            include_consumables,
+                            bom_consumable_status, # Pass status dict down
                         )
                     else:
                         logging.debug(
@@ -142,14 +156,15 @@ def get_recursive_bom(
 
                     # Add the gross required quantity directly to the accumulator
                     logging.debug(
-                        f"Base component: {sub_part_details.get('name')} (ID: {sub_part_id}), Gross Qty: {total_sub_quantity}, Consumable: {is_consumable}"
+                        f"Base component: {sub_part_details.get('name')} (ID: {sub_part_id}), Gross Qty: {total_sub_quantity}, PartConsumable: {is_part_consumable}, BomItemConsumable: {is_bom_item_consumable}"
                     )
-                    if include_consumables or not is_consumable:
+                    # Quantity calculation depends on the part's consumable flag and the include_consumables setting
+                    if include_consumables or not is_part_consumable:
                         required_components[root_input_id][
                             sub_part_id
                         ] += total_sub_quantity
                     else:
-                        logging.debug(f"Ignoring consumable base component quantity for {sub_part_id}")
+                        logging.debug(f"Ignoring part-consumable base component quantity for {sub_part_id}")
         elif bom_items is None:
             logging.warning(
                 f"Could not process BOM for assembly {part_id} due to fetch error."

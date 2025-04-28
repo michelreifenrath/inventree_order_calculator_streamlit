@@ -266,16 +266,12 @@ if calculate_pressed:
                 MANUFACTURER_TO_EXCLUDE if exclude_manufacturer else None
             )
 
-            # Get the state of the consumables checkbox (default to True if not found)
-            include_consumables_state = st.session_state.get("include_consumables_checkbox", True)
-
-            # Call the core logic with exclusion parameters and consumables flag
+            # Call the core logic with exclusion parameters
             parts_to_order, sub_assemblies = calculate_required_parts(
                 api,
                 targets_dict,
                 exclude_supplier_name=supplier_to_exclude_arg,  # Pass supplier exclusion
                 exclude_manufacturer_name=manufacturer_to_exclude_arg,  # Pass manufacturer exclusion
-                include_consumables=include_consumables_state, # Pass checkbox state
                 progress_callback=update_progress,
             )
             # Correct indentation for this block

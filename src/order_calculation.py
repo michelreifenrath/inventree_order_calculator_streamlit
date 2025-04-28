@@ -140,8 +140,7 @@ def calculate_required_parts(
     exclude_supplier_name: Optional[str] = None,
     exclude_manufacturer_name: Optional[str] = None,
     progress_callback: Optional[Callable[[int, str], None]] = None,
-    include_consumables: bool = True, # New parameter
-) -> tuple[List[Dict[str, any]], List[Dict[str, any]]]:
+) -> tuple[List[Dict[str, any]], List[Dict[str, any]], Dict[int, bool]]:
     """
     Calculates the list of parts to order based on target assemblies,
     with options to exclude by supplier or manufacturer.
@@ -152,21 +151,21 @@ def calculate_required_parts(
         exclude_supplier_name (Optional[str]): Supplier name to exclude.
         exclude_manufacturer_name (Optional[str]): Manufacturer name to exclude.
         progress_callback (Optional[Callable]): Progress update callback.
-        include_consumables (bool): If False, quantities for parts marked 'consumable' are ignored in BOM calculation.
 
     Returns:
-        tuple[List[Dict[str, any]], List[Dict[str, any]]]:
+        tuple[List[Dict[str, any]], List[Dict[str, any]], Dict[int, bool]]:
             - List of parts to order with details.
             - List of sub-assemblies required.
+            - Dictionary mapping part IDs to their BOM-level consumable status.
     """
     if not api:
         logging.error(
             "Cannot calculate parts: InvenTree API connection is not available."
         )
-        return [], []
+        return [], [], {} # Return empty dict for consumable status
     if not target_assemblies:
         logging.info("No target assemblies provided.")
-        return [], []
+        return [], [], {} # Return empty dict for consumable status
 
     logging.info(f"Calculating required components for targets: {target_assemblies}")
     required_base_components: defaultdict[int, defaultdict[int, float]] = defaultdict(
@@ -180,6 +179,8 @@ def calculate_required_parts(
     all_encountered_part_ids: Set[int] = set()
     # Set to track which parts are assemblies
     assembly_part_ids: Set[int] = set()
+    # Dictionary to track BOM-level consumable status
+    bom_consumable_status: Dict[int, bool] = {}
 
     root_assembly_ids = tuple(target_assemblies.keys())
     # Fetch root assembly names early for progress callback
@@ -205,8 +206,9 @@ def calculate_required_parts(
                 int(part_id),
                 template_only_flags,
                 all_encountered_part_ids,
-                required_sub_assemblies,  # Pass the sub_assemblies dictionary
-                include_consumables, # Pass the new parameter
+                required_sub_assemblies,
+                include_consumables=True, # Assuming we always include for calculation, filtering happens later
+                bom_consumable_status=bom_consumable_status, # Pass the status dict
             )
             # Add the root assembly to the assembly set
             assembly_part_ids.add(int(part_id))
@@ -222,7 +224,7 @@ def calculate_required_parts(
 
     if not total_required_quantities:
         logging.info("No base components found after BOM processing. Nothing to order.")
-        return [], []
+        return [], [], {} # Return empty dict for consumable status
 
     # --- Fetch Details for All Encountered Parts ---
     if progress_callback:
@@ -279,8 +281,9 @@ def calculate_required_parts(
             "purchase_orders": [], # Initialize as list
             # Add manufacturer/supplier if needed later
             "manufacturer_name": part_data.get("manufacturer_name") if part_data else None, # Use correct key
-            "supplier_names": part_data.get("supplier_names", []) if part_data else [], # Use correct key and get list
-            "is_consumable": False, # Initialize default value
+            "supplier_names": part_data.get("supplier_names", []) if part_data else [],
+            "is_part_consumable": part_data.get("consumable", False) if part_data else False, # Part's own flag
+            "is_bom_consumable": False, # Initialize BOM-level flag, will be updated in the final loop
         }
 
     # --- Collect Root Assembly Names for Needed Parts ---
@@ -308,18 +311,6 @@ def calculate_required_parts(
             try:
                 part_obj = Part(api, pk=part_id)
                 logging.info(f"Processing requirements for Part ID: {part_obj.pk}") # Corrected logger and indentation
-
-                # --- Calculate is_consumable flag ---
-                try:
-                    component = getattr(part_obj, 'component', False)
-                    trackable = getattr(part_obj, 'trackable', False)
-                    is_consumable = bool(component and not trackable)
-                    # Update the flag in the details dictionary
-                    if part_id in parts_to_order_details:
-                         parts_to_order_details[part_id]['is_consumable'] = is_consumable
-                except Exception as e_attr:
-                    logging.warning(f"Could not determine consumable status for part {part_id}: {e_attr}")
-                    # Default remains False if error occurs here
 
                 # --- Process requirements ---
                 requirements = part_obj.getRequirements()
@@ -355,9 +346,11 @@ def calculate_required_parts(
         # Add PO data
         details["purchase_orders"] = part_po_data.get(part_id, [])
         # Add 'required_for_order' data
-        details["required"] = part_requirements_data.get(part_id, 0) # Renamed key
+        details["required"] = part_requirements_data.get(part_id, 0)
+        # Update BOM-level consumable status from the collected dictionary
+        details["is_bom_consumable"] = bom_consumable_status.get(part_id, False)
         # Calculate Saldo as integer
-        saldo = int(details["available_stock"] - details["required"]) # Use renamed key
+        saldo = int(details["available_stock"] - details["required"])
         details["saldo"] = saldo
         # Calculate 'to_order' based on the integer saldo
         details["to_order"] = max(0, round(details["total_required"] - saldo, 3))
@@ -456,5 +449,5 @@ def calculate_required_parts(
 
     if progress_callback:
         progress_callback(100, "Berechnung abgeschlossen.")
-    logging.info(f"Calculation complete. Found {len(filtered_list)} parts to order and {len(sub_assembly_list)} sub-assemblies (of which {sub_assemblies_to_build} need to be built).")
-    return filtered_list, sub_assembly_list
+    logging.info(f"Calculation complete. Found {len(filtered_list)} parts to order and {len(sub_assembly_list)} sub-assemblies (of which {sub_assemblies_to_build} need to be built). Returning BOM consumable status: {bom_consumable_status}")
+    return filtered_list, sub_assembly_list, bom_consumable_status

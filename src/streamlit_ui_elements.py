@@ -161,13 +161,6 @@ def render_assembly_inputs(
                 ]
 
 
-# Option to include consumables
-    st.sidebar.checkbox(
-        "Verbrauchsmaterial berücksichtigen",
-        value=True,  # Default to True as per requirement
-        key="include_consumables_checkbox", # Key to access state in app.py
-        help="Berücksichtigt Teile, die als Verbrauchsmaterial gekennzeichnet sind, bei der Bedarfsberechnung."
-    )
 # --- Ergebnisse anzeigen ---
 
 
@@ -321,12 +314,12 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
 
     st.header("📋 Ergebnisse: Benötigte Teile")
 
-    # Add checkbox to hide consumables
-    hide_consumables = st.checkbox(
-        "Verbrauchsmaterial ausblenden",
+    # Add checkbox to hide BOM consumables
+    hide_bom_consumables = st.checkbox(
+        "BOM-Verbrauchsmaterial ausblenden", # Updated Label
         value=False,
-        key="hide_consumables_checkbox",
-        help="Blendet Teile aus, die als Verbrauchsmaterial gekennzeichnet sind."
+        key="hide_bom_consumables_checkbox", # Updated Key
+        help="Blendet Teile aus, die auf einer Stückliste als Verbrauchsmaterial gekennzeichnet sind." # Updated Help Text
     )
 
     if results_list is not None:
@@ -344,6 +337,7 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
                 "to_order",
                 "used_in_assemblies",
                 "purchase_orders",
+                "is_bom_consumable", # Ensure the flag is expected
             }
             # Add manufacturer/supplier if they are expected in the final list for display/CSV
             # required_cols.update({"manufacturer_name", "supplier_names"})
@@ -361,160 +355,164 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
 
             # Proceed with DataFrame manipulation only if valid
 
-            # Filter consumables if checkbox is checked
-            if hide_consumables:
-                # Check if 'is_consumable' column exists before filtering
-                if 'is_consumable' in df_full.columns:
-                    df_filtered = df_full[df_full['is_consumable'] == False].copy() # Use .copy() to avoid SettingWithCopyWarning
-                    log.info("Filtering out consumable parts based on checkbox.")
+            # --- Filter based on checkbox ---
+            if hide_bom_consumables:
+                # Check if the column exists before filtering
+                if 'is_bom_consumable' in df_full.columns:
+                    df_processed = df_full[df_full['is_bom_consumable'] == False].copy()
                 else:
-                    st.warning("Spalte 'is_consumable' nicht in den Daten gefunden. Filterung übersprungen.")
-                    log.warning("Column 'is_consumable' not found in DataFrame. Skipping filtering.")
-                    df_filtered = df_full.copy() # Use original data if column missing
+                    st.warning("Spalte 'is_bom_consumable' nicht in den Daten gefunden. Filter kann nicht angewendet werden.")
+                    log.warning("Column 'is_bom_consumable' not found in DataFrame. Skipping filter.")
+                    df_processed = df_full.copy() # Use original data if column missing
             else:
-                df_filtered = df_full.copy() # Use original data if checkbox not checked
+                df_processed = df_full.copy()
 
-            # --- IMPORTANT: Use df_filtered for all subsequent operations ---
+            # --- IMPORTANT: Use df_processed for all subsequent operations ---
 
             # Check if the filtered DataFrame is empty before proceeding
-            if df_filtered.empty:
+            if df_processed.empty:
                  st.info(
-                     "Nach Anwendung des Filters gibt es keine Teile anzuzeigen."
+                     "Keine Teile zum Anzeigen nach Anwendung der Filter." if hide_bom_consumables else "Es gibt keine Teile anzuzeigen."
                  )
                  # Optionally return or skip further processing like CSV download
                  # return # Or just skip the data_editor and download button parts
-
-            # Create a summary string for purchase orders using the filtered DataFrame
-            df_filtered["Bestellungen"] = df_filtered.get("purchase_orders", []).apply(
-                lambda po_list: (
-                    ", ".join(
-                        [
-                            f"{po.get('po_ref', '')} ({po.get('quantity', 0)} Stk, Status: {po.get('po_status', '')})"
-                            for po in po_list
-                        ]
+            else:
+                # Create a summary string for purchase orders using the processed DataFrame
+                df_processed["Bestellungen"] = df_processed.get("purchase_orders", []).apply(
+                    lambda po_list: (
+                        ", ".join(
+                            [
+                                f"{po.get('po_ref', '')} ({po.get('quantity', 0)} Stk, Status: {po.get('po_status', '')})"
+                                for po in po_list
+                            ]
+                        )
+                        if po_list
+                        else "Keine"
                     )
-                    if po_list
-                    else "Keine"
                 )
-            )
 
-            # Create URL column for linking
-            # TODO: Make base_url configurable?
-            base_url = "https://lager.haip.solutions/"
-            # Use df_filtered
-            df_filtered["Part URL"] = df_filtered["pk"].apply(
-                lambda pk: f"{base_url}platform/part/{pk}/"
-            )
-
-            # Select columns for display (including Name and the hidden URL)
-            # Add supplier/manufacturer columns if needed for display
-            display_columns_ordered = [
-                "name",
-                "Part URL",  # Hidden link column
-                "total_required",
-                "available_stock",
-                "saldo", # Added Saldo
-                "to_order",
-                "used_in_assemblies",
-                "Bestellungen",
-                # "manufacturer_name", # Uncomment if needed
-                # "supplier_names", # Uncomment if needed (might need formatting)
-            ]
-            # Use df_filtered
-            df_display = df_filtered[
-                [col for col in display_columns_ordered if col in df_filtered.columns]
-            ]  # Select only existing columns
-
-            # Update column headers
-            df_display.columns = [
-                "Name",
-                "Part ID",  # Header for the URL column
-                "Gesamt benötigt",
-                "Auf Lager",
-                "Verfügbar", # Renamed from Saldo
-                "Zu bestellen",
-                "Verwendet in Assemblies",
-                "Bestellungen",
-                # "Hersteller", # Uncomment if needed
-                # "Lieferanten", # Uncomment if needed
-            ]
-
-            # Configure columns for st.data_editor
-            column_config = {
-                "Name": st.column_config.TextColumn(width="large"),
-                "Part ID": st.column_config.LinkColumn(
-                    display_text=r"https://lager.haip.solutions/platform/part/(\d+)/",
-                    validate=r"^https://lager.haip.solutions/platform/part/\d+/$",
-                    help="Klicken, um das Teil in InvenTree zu öffnen",
-                    width="small",
-                ),
-                "Verfügbar": st.column_config.NumberColumn(
-                    format="%d",
-                    width="small",
-                    help="Verfügbarer Lagerbestand minus Gesamtbedarf (kann negativ sein)."
-                ),
-                "Bestellungen": st.column_config.TextColumn(width="large"),
-                # Add config for manufacturer/supplier if displayed
-                # "Hersteller": st.column_config.TextColumn(width="medium"),
-                # "Lieferanten": st.column_config.TextColumn(width="medium"), # Might need custom formatting
-            }
-
-            st.data_editor(
-                df_display,
-                column_config=column_config,
-                use_container_width=True,
-                hide_index=True,
-            )
-
-            # --- CSV Download ---
-            # Reorder columns for CSV clarity, include pk and potentially raw supplier/manufacturer
-            csv_columns_ordered = [
-                "pk",
-                "name",
-                "total_required",
-                "available_stock",
-                "saldo", # Added Saldo
-                "to_order",
-                "used_in_assemblies",
-                "Bestellungen",  # Formatted PO string
-                # "manufacturer_name", # Raw manufacturer name
-                # "supplier_names", # Raw list of supplier names
-            ]
-            # Use df_filtered
-            df_csv = df_filtered[
-                [col for col in csv_columns_ordered if col in df_filtered.columns]
-            ]
-
-            # Use consistent headers, map pk to Part ID
-            df_csv.columns = [
-                "Part ID",
-                "Name",
-                "Gesamt benötigt",
-                "Auf Lager",
-                "Saldo", # Added Saldo header
-                "Zu bestellen",
-                "Verwendet in Assemblies",
-                "Bestellungen",
-                # "Hersteller",
-                # "Lieferanten (Liste)", # Indicate it's a list
-            ]
-
-            try:
-                csv_data = df_csv.to_csv(index=False).encode("utf-8")
-                st.download_button(
-                    label="💾 Ergebnisse als CSV herunterladen",
-                    data=csv_data,
-                    file_name="inventree_order_list.csv",
-                    mime="text/csv",
+                # Create URL column for linking
+                # TODO: Make base_url configurable?
+                base_url = "https://lager.haip.solutions/"
+                # Use df_processed
+                df_processed["Part URL"] = df_processed["pk"].apply(
+                    lambda pk: f"{base_url}platform/part/{pk}/"
                 )
-            except Exception as e:
-                st.error(f"Fehler beim Erstellen der CSV-Datei: {e}")
-                log.error("Error generating CSV data", exc_info=True)
+
+                # Select columns for display (including Name and the hidden URL)
+                # Add supplier/manufacturer columns if needed for display
+                display_columns_ordered = [
+                    "name",
+                    "Part URL",  # Hidden link column
+                    "total_required",
+                    "available_stock",
+                    "saldo", # Added Saldo
+                    "to_order",
+                    "used_in_assemblies",
+                    "Bestellungen",
+                    # "manufacturer_name", # Uncomment if needed
+                    # "supplier_names", # Uncomment if needed (might need formatting)
+                    # "is_bom_consumable", # Optionally display the flag for debugging/info
+                ]
+                # Use df_processed
+                df_display = df_processed[
+                    [col for col in display_columns_ordered if col in df_processed.columns]
+                ]  # Select only existing columns
+
+                # Update column headers
+                df_display.columns = [
+                    "Name",
+                    "Part ID",  # Header for the URL column
+                    "Gesamt benötigt",
+                    "Auf Lager",
+                    "Verfügbar", # Renamed from Saldo
+                    "Zu bestellen",
+                    "Verwendet in Assemblies",
+                    "Bestellungen",
+                    # "Hersteller", # Uncomment if needed
+                    # "Lieferanten", # Uncomment if needed
+                    # "BOM Konsum?", # Optional header for the flag
+                ]
+
+                # Configure columns for st.data_editor
+                column_config = {
+                    "Name": st.column_config.TextColumn(width="large"),
+                    "Part ID": st.column_config.LinkColumn(
+                        display_text=r"https://lager.haip.solutions/platform/part/(\d+)/",
+                        validate=r"^https://lager.haip.solutions/platform/part/\d+/$",
+                        help="Klicken, um das Teil in InvenTree zu öffnen",
+                        width="small",
+                    ),
+                    "Verfügbar": st.column_config.NumberColumn(
+                        format="%d",
+                        width="small",
+                        help="Verfügbarer Lagerbestand minus Gesamtbedarf (kann negativ sein)."
+                    ),
+                    "Bestellungen": st.column_config.TextColumn(width="large"),
+                    # Add config for manufacturer/supplier if displayed
+                    # "Hersteller": st.column_config.TextColumn(width="medium"),
+                    # "Lieferanten": st.column_config.TextColumn(width="medium"), # Might need custom formatting
+                    # "BOM Konsum?": st.column_config.CheckboxColumn(width="small"), # Optional display config
+                }
+
+                st.data_editor(
+                    df_display,
+                    column_config=column_config,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                # --- CSV Download ---
+                # Reorder columns for CSV clarity, include pk and potentially raw supplier/manufacturer
+                csv_columns_ordered = [
+                    "pk",
+                    "name",
+                    "total_required",
+                    "available_stock",
+                    "saldo", # Added Saldo
+                    "to_order",
+                    "used_in_assemblies",
+                    "Bestellungen",  # Formatted PO string
+                    "is_bom_consumable", # Include the flag in CSV
+                    # "manufacturer_name", # Raw manufacturer name
+                    # "supplier_names", # Raw list of supplier names
+                ]
+                # Use df_processed
+                df_csv = df_processed[
+                    [col for col in csv_columns_ordered if col in df_processed.columns]
+                ]
+
+                # Use consistent headers, map pk to Part ID
+                df_csv.columns = [
+                    "Part ID",
+                    "Name",
+                    "Gesamt benötigt",
+                    "Auf Lager",
+                    "Saldo", # Added Saldo header
+                    "Zu bestellen",
+                    "Verwendet in Assemblies",
+                    "Bestellungen",
+                    "Ist BOM Verbrauchsmaterial", # CSV Header for the flag
+                    # "Hersteller",
+                    # "Lieferanten (Liste)", # Indicate it's a list
+                ]
+
+                try:
+                    csv_data = df_csv.to_csv(index=False).encode("utf-8")
+                    st.download_button(
+                        label="💾 Ergebnisse als CSV herunterladen",
+                        data=csv_data,
+                        file_name="inventree_order_list.csv",
+                        mime="text/csv",
+                    )
+                except Exception as e:
+                    st.error(f"Fehler beim Erstellen der CSV-Datei: {e}")
+                    log.error("Error generating CSV data", exc_info=True)
 
         elif results_list is not None and len(results_list) == 0:
             # Handle case where calculation succeeded but yielded an empty list
             st.info(
-                "👍 Alle Teile auf Lager oder Filterkriterien erfüllen keine Teile."
+                "👍 Alle Teile auf Lager oder keine Teile entsprechen den Kriterien." # Adjusted message
             )
     else:
         # No results calculated yet
