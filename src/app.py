@@ -267,7 +267,7 @@ if calculate_pressed:
             )
 
             # Call the core logic with exclusion parameters
-            parts_to_order, sub_assemblies = calculate_required_parts(
+            parts_to_order, sub_assemblies, _ = calculate_required_parts(
                 api,
                 targets_dict,
                 exclude_supplier_name=supplier_to_exclude_arg,  # Pass supplier exclusion
