@@ -2,6 +2,7 @@ import logging
 from collections import defaultdict
 from typing import Optional, Callable, Dict, List, Set
 from inventree.api import InvenTreeAPI
+from inventree.part import Part # Added import
 
 # Import necessary classes conditionally
 try:
@@ -298,6 +299,29 @@ def calculate_required_parts(
     part_ids_needing_order = list(parts_to_order_details.keys())
     part_po_data = _fetch_purchase_order_data(api, part_ids_needing_order)
 
+    # --- Fetch 'Required for Order' Data ---
+    if progress_callback:
+        progress_callback(90, "Fetching 'required for order' data...")
+    part_requirements_data = defaultdict(int)
+    if part_ids_needing_order:
+        logging.info(f"Fetching requirements data for {len(part_ids_needing_order)} parts...")
+        for part_id in part_ids_needing_order:
+            try:
+                part_obj = Part(api, pk=part_id)
+                requirements = part_obj.getRequirements()
+                # Ensure requirements is a dict and 'required' key exists
+                if isinstance(requirements, dict) and 'required' in requirements:
+                    required_val = requirements.get('required', 0)
+                    # Ensure the value is numeric, default to 0 if not
+                    part_requirements_data[part_id] = int(required_val) if isinstance(required_val, (int, float, str) and str(required_val).isdigit()) else 0
+                else:
+                     part_requirements_data[part_id] = 0 # Default if key missing or not dict
+                     logging.warning(f"Could not get valid 'required' value for part {part_id}. Requirements data: {requirements}")
+
+            except Exception as e:
+                logging.error(f"Error fetching requirements for part {part_id}: {e}", exc_info=True)
+                part_requirements_data[part_id] = 0 # Default to 0 on error
+
     # --- Build Final List ---
     if progress_callback:
         progress_callback(95, "Finalizing results...")
@@ -307,6 +331,8 @@ def calculate_required_parts(
         details["used_in_assemblies"] = ", ".join(sorted(list(details["used_in_assemblies"])))
         # Add PO data
         details["purchase_orders"] = part_po_data.get(part_id, [])
+        # Add 'required_for_order' data
+        details["required_for_order"] = part_requirements_data.get(part_id, 0)
         final_list.append(details)
 
     # --- Apply Exclusions ---

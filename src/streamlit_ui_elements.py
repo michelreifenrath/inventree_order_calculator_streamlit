@@ -373,6 +373,7 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
                 "name",
                 "Part URL",  # Hidden link column
                 "total_required",
+                "required_for_order", # Added new column
                 "available_stock",
                 "to_order",
                 "used_in_assemblies",
@@ -389,6 +390,7 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
                 "Name",
                 "Part ID",  # Header for the URL column
                 "Gesamt benötigt",
+                "Benötigt f. Best.", # Added new header
                 "Auf Lager",
                 "Zu bestellen",
                 "Verwendet in Assemblies",
@@ -405,6 +407,11 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
                     validate=r"^https://lager.haip.solutions/platform/part/\d+/$",
                     help="Klicken, um das Teil in InvenTree zu öffnen",
                     width="small",
+                ),
+                "Benötigt f. Best.": st.column_config.NumberColumn(
+                    format="%.2f",
+                    width="small",
+                    help="Die Menge, die explizit für die aktuelle Bestellung benötigt wird (ohne Berücksichtigung des Lagerbestands für andere Zwecke)."
                 ),
                 "Bestellungen": st.column_config.TextColumn(width="large"),
                 # Add config for manufacturer/supplier if displayed
@@ -425,6 +432,7 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
                 "pk",
                 "name",
                 "total_required",
+                "required_for_order", # Added new column
                 "available_stock",
                 "to_order",
                 "used_in_assemblies",
@@ -441,6 +449,7 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
                 "Part ID",
                 "Name",
                 "Gesamt benötigt",
+                "Benötigt f. Best.", # Added new header
                 "Auf Lager",
                 "Zu bestellen",
                 "Verwendet in Assemblies",
