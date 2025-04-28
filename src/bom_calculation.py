@@ -83,14 +83,13 @@ def get_recursive_bom(
                     is_template = sub_part_details.get("is_template", False)
                     variant_stock = sub_part_details.get("variant_stock", 0.0)
 
-                    # Calculate available stock
-                    template_only = template_only_flags.get(sub_part_id, False)
-                    if template_only:
-                        available_stock = in_stock
-                    elif is_template:
+                    # Calculate available stock based on parent BOM's allow_variants setting
+                    if allow_variants:
                         available_stock = in_stock + variant_stock
+                        logging.debug(f"Sub-assembly {sub_part_id}: Allowing variants, Available Stock = {in_stock} (in) + {variant_stock} (variant) = {available_stock}")
                     else:
                         available_stock = in_stock
+                        logging.debug(f"Sub-assembly {sub_part_id}: Not allowing variants, Available Stock = {in_stock}")
 
                     # Calculate how many need to be built
                     to_build = max(0, total_sub_quantity - available_stock)
@@ -116,13 +115,42 @@ def get_recursive_bom(
                         logging.debug(
                             f"Skipping BOM processing for sub-assembly {sub_part_details.get('name')} (ID: {sub_part_id}) as sufficient stock is available"
                         )
-                else:
+                else: # It's a base component
+                    # Get details needed for stock calculation
+                    base_in_stock = sub_part_details.get("in_stock", 0.0)
+                    base_variant_stock = sub_part_details.get("variant_stock", 0.0)
+
+                    # --- BEGIN DEBUG LOGGING (Keep one instance) ---
                     logging.debug(
-                        f"Adding base component: {sub_part_details.get('name')} (ID: {sub_part_id}), Qty: {total_sub_quantity}"
+                        f"Base Component Check: ID={sub_part_id}, Name='{sub_part_details.get('name')}', "
+                        f"AllowVariants={allow_variants}, InStock={base_in_stock}, "
+                        f"VariantStock={base_variant_stock}, RawRequired={total_sub_quantity}"
                     )
-                    required_components[root_input_id][
-                        sub_part_id
-                    ] += total_sub_quantity
+                    # --- END DEBUG LOGGING ---
+
+                    # Calculate available stock for the base component
+                    if allow_variants:
+                        # Consider both main stock and variant stock if variants are allowed
+                        available_stock = base_in_stock + base_variant_stock
+                    else:
+                        # Only consider main stock if variants are not allowed
+                        available_stock = base_in_stock
+
+                    # Calculate the net quantity needed after considering stock
+                    net_required_quantity = max(0, total_sub_quantity - available_stock)
+
+                    logging.debug(
+                        f"Processing base component: {sub_part_details.get('name')} (ID: {sub_part_id}), "
+                        f"RawRequired: {total_sub_quantity}, Available: {available_stock}, NetRequired: {net_required_quantity}"
+                    )
+
+                    # Add the net required quantity to the accumulator
+                    if net_required_quantity > 0:
+                        required_components[root_input_id][
+                            sub_part_id
+                        ] += net_required_quantity
+                    else:
+                         logging.debug(f"Sufficient stock available for base component {sub_part_id}. No net requirement added.")
         elif bom_items is None:
             logging.warning(
                 f"Could not process BOM for assembly {part_id} due to fetch error."

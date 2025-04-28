@@ -255,17 +255,17 @@ def calculate_required_parts(
             variant_stock = part_data.get("variant_stock", 0.0)
             part_name = part_data.get("name", "Unknown")
 
-        template_only = template_only_flags.get(part_id, False)
-        if template_only:
-            total_available_stock = in_stock
-        elif is_template:
+        # Calculate available stock, prioritizing is_template for including variant stock
+        if is_template:
             total_available_stock = in_stock + variant_stock
         else:
             total_available_stock = in_stock
+        # Note: template_only_flag might be used elsewhere, but not for available stock calculation.
 
         part_available_stock_map[part_id] = total_available_stock # Store for later use
-        global_to_order = total_required - total_available_stock
-        order_qty = round(global_to_order, 3) if global_to_order > 0.001 else 0.0
+        # The 'total_required' already represents the net quantity after stock subtraction in get_recursive_bom.
+        # We still fetch 'total_available_stock' for display purposes, but don't subtract it again here.
+        order_qty = round(total_required, 3) if total_required > 0.001 else 0.0
 
         if order_qty > 0:
              parts_to_order_details[part_id] = {
@@ -366,14 +366,12 @@ def calculate_required_parts(
             is_template = sub_part_data.get("is_template", False)
             variant_stock = sub_part_data.get("variant_stock", 0.0)
 
-            # Calculate available stock
-            template_only = template_only_flags.get(sub_id, False)
-            if template_only:
-                total_available_stock = in_stock
-            elif is_template:
+            # Calculate available stock, prioritizing is_template for including variant stock
+            if is_template:
                 total_available_stock = in_stock + variant_stock
             else:
                 total_available_stock = in_stock
+            # Note: template_only_flag might be used elsewhere, but not for available stock calculation.
 
             # Calculate how many need to be built
             to_build = max(0, qty - total_available_stock)
