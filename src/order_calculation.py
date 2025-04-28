@@ -308,6 +308,7 @@ def calculate_required_parts(
         for part_id in part_ids_needing_order:
             try:
                 part_obj = Part(api, pk=part_id)
+                logger.info(f"Processing requirements for Part ID: {part_obj.pk}") # Indent this line
                 requirements = part_obj.getRequirements()
                 # Ensure requirements is a dict
                 if isinstance(requirements, dict):
@@ -326,7 +327,7 @@ def calculate_required_parts(
                      part_requirements_data[part_id] = 0 # Default if requirements is not a dict
                      logging.warning(f"Requirements data for part {part_id} was not a dictionary. Data: {requirements}")
 
-            except Exception as e:
+            except Exception as e: # Ensure except aligns with try
                 logging.error(f"Error fetching requirements for part {part_id}: {e}", exc_info=True)
                 part_requirements_data[part_id] = 0 # Default to 0 on error
 
