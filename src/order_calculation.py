@@ -313,7 +313,7 @@ def calculate_required_parts(
                 if isinstance(requirements, dict) and 'required' in requirements:
                     required_val = requirements.get('required', 0)
                     # Ensure the value is numeric, default to 0 if not
-                    part_requirements_data[part_id] = int(required_val) if isinstance(required_val, (int, float, str) and str(required_val).isdigit()) else 0
+                    part_requirements_data[part_id] = int(required_val) if isinstance(required_val, (int, float, str)) and str(required_val).isdigit() else 0
                 else:
                      part_requirements_data[part_id] = 0 # Default if key missing or not dict
                      logging.warning(f"Could not get valid 'required' value for part {part_id}. Requirements data: {requirements}")
