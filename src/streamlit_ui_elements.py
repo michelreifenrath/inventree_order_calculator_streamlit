@@ -314,6 +314,14 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
 
     st.header("📋 Ergebnisse: Benötigte Teile")
 
+    # Add checkbox to hide consumables
+    hide_consumables = st.checkbox(
+        "Verbrauchsmaterial ausblenden",
+        value=False,
+        key="hide_consumables_checkbox",
+        help="Blendet Teile aus, die als Verbrauchsmaterial gekennzeichnet sind."
+    )
+
     if results_list is not None:
         if len(results_list) > 0:
             # --- Flat List Display ---
@@ -346,8 +354,31 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
 
             # Proceed with DataFrame manipulation only if valid
 
-            # Create a summary string for purchase orders
-            df_full["Bestellungen"] = df_full.get("purchase_orders", []).apply(
+            # Filter consumables if checkbox is checked
+            if hide_consumables:
+                # Check if 'is_consumable' column exists before filtering
+                if 'is_consumable' in df_full.columns:
+                    df_filtered = df_full[df_full['is_consumable'] == False].copy() # Use .copy() to avoid SettingWithCopyWarning
+                    log.info("Filtering out consumable parts based on checkbox.")
+                else:
+                    st.warning("Spalte 'is_consumable' nicht in den Daten gefunden. Filterung übersprungen.")
+                    log.warning("Column 'is_consumable' not found in DataFrame. Skipping filtering.")
+                    df_filtered = df_full.copy() # Use original data if column missing
+            else:
+                df_filtered = df_full.copy() # Use original data if checkbox not checked
+
+            # --- IMPORTANT: Use df_filtered for all subsequent operations ---
+
+            # Check if the filtered DataFrame is empty before proceeding
+            if df_filtered.empty:
+                 st.info(
+                     "Nach Anwendung des Filters gibt es keine Teile anzuzeigen."
+                 )
+                 # Optionally return or skip further processing like CSV download
+                 # return # Or just skip the data_editor and download button parts
+
+            # Create a summary string for purchase orders using the filtered DataFrame
+            df_filtered["Bestellungen"] = df_filtered.get("purchase_orders", []).apply(
                 lambda po_list: (
                     ", ".join(
                         [
@@ -363,7 +394,8 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
             # Create URL column for linking
             # TODO: Make base_url configurable?
             base_url = "https://lager.haip.solutions/"
-            df_full["Part URL"] = df_full["pk"].apply(
+            # Use df_filtered
+            df_filtered["Part URL"] = df_filtered["pk"].apply(
                 lambda pk: f"{base_url}platform/part/{pk}/"
             )
 
@@ -381,8 +413,9 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
                 # "manufacturer_name", # Uncomment if needed
                 # "supplier_names", # Uncomment if needed (might need formatting)
             ]
-            df_display = df_full[
-                [col for col in display_columns_ordered if col in df_full.columns]
+            # Use df_filtered
+            df_display = df_filtered[
+                [col for col in display_columns_ordered if col in df_filtered.columns]
             ]  # Select only existing columns
 
             # Update column headers
@@ -440,8 +473,9 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
                 # "manufacturer_name", # Raw manufacturer name
                 # "supplier_names", # Raw list of supplier names
             ]
-            df_csv = df_full[
-                [col for col in csv_columns_ordered if col in df_full.columns]
+            # Use df_filtered
+            df_csv = df_filtered[
+                [col for col in csv_columns_ordered if col in df_filtered.columns]
             ]
 
             # Use consistent headers, map pk to Part ID

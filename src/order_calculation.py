@@ -277,6 +277,7 @@ def calculate_required_parts(
             # Add manufacturer/supplier if needed later
             "manufacturer_name": part_data.get("manufacturer_name") if part_data else None, # Use correct key
             "supplier_names": part_data.get("supplier_names", []) if part_data else [], # Use correct key and get list
+            "is_consumable": False, # Initialize default value
         }
 
     # --- Collect Root Assembly Names for Needed Parts ---
@@ -304,6 +305,20 @@ def calculate_required_parts(
             try:
                 part_obj = Part(api, pk=part_id)
                 logging.info(f"Processing requirements for Part ID: {part_obj.pk}") # Corrected logger and indentation
+
+                # --- Calculate is_consumable flag ---
+                try:
+                    component = getattr(part_obj, 'component', False)
+                    trackable = getattr(part_obj, 'trackable', False)
+                    is_consumable = bool(component and not trackable)
+                    # Update the flag in the details dictionary
+                    if part_id in parts_to_order_details:
+                         parts_to_order_details[part_id]['is_consumable'] = is_consumable
+                except Exception as e_attr:
+                    logging.warning(f"Could not determine consumable status for part {part_id}: {e_attr}")
+                    # Default remains False if error occurs here
+
+                # --- Process requirements ---
                 requirements = part_obj.getRequirements()
                 # Ensure requirements is a dict
                 if isinstance(requirements, dict):
