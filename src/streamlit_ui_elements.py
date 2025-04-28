@@ -391,7 +391,7 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
                 "Part ID",  # Header for the URL column
                 "Gesamt benötigt",
                 "Auf Lager",
-                "Saldo", # Added Saldo header
+                "Verfügbar", # Renamed from Saldo
                 "Zu bestellen",
                 "Verwendet in Assemblies",
                 "Bestellungen",
@@ -408,8 +408,8 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
                     help="Klicken, um das Teil in InvenTree zu öffnen",
                     width="small",
                 ),
-                "Saldo": st.column_config.NumberColumn(
-                    format="%.2f",
+                "Verfügbar": st.column_config.NumberColumn(
+                    format="%d",
                     width="small",
                     help="Verfügbarer Lagerbestand minus Gesamtbedarf (kann negativ sein)."
                 ),
