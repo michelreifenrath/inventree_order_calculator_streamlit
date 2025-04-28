@@ -312,16 +312,17 @@ def calculate_required_parts(
                 requirements = part_obj.getRequirements()
                 # Ensure requirements is a dict
                 if isinstance(requirements, dict):
-                    # Get build and sales order quantities, defaulting to 0 if missing or not numeric
-                    required_build = requirements.get('required_build_order_quantity', 0)
-                    required_sales = requirements.get('required_sales_order_quantity', 0)
+                    # Get the 'required' quantity directly, defaulting to 0 if missing or not numeric
+                    required_total = requirements.get('required', 0)
+                    required_total_val = 0
+                    try:
+                        # Attempt conversion to float first to handle potential decimal strings, then to int
+                        required_total_val = int(float(required_total))
+                    except (ValueError, TypeError):
+                         logging.warning(f"Could not convert 'required' value '{required_total}' to int for part {part_id}. Defaulting to 0. Requirements data: {requirements}")
+                         required_total_val = 0 # Ensure it's 0 if conversion fails
 
-                    required_build_val = int(required_build) if isinstance(required_build, (int, float, str)) and str(required_build).isdigit() else 0
-                    required_sales_val = int(required_sales) if isinstance(required_sales, (int, float, str)) and str(required_sales).isdigit() else 0
-
-                    part_requirements_data[part_id] = required_build_val + required_sales_val
-                    if required_build_val == 0 and required_sales_val == 0 and (requirements.get('required_build_order_quantity') is not None or requirements.get('required_sales_order_quantity') is not None):
-                         logging.warning(f"Non-numeric or missing values for build/sales quantities for part {part_id}. Build: '{required_build}', Sales: '{required_sales}'. Requirements data: {requirements}")
+                    part_requirements_data[part_id] = required_total_val
 
                 else:
                      part_requirements_data[part_id] = 0 # Default if requirements is not a dict
