@@ -265,24 +265,19 @@ def calculate_required_parts(
 
         part_available_stock_map[part_id] = total_available_stock # Store for later use
 
-        # Calculate the net quantity to order by subtracting available stock from the gross total_required
-        # total_required now represents the gross requirement from the modified get_recursive_bom
-        order_qty = max(0, round(total_required - total_available_stock, 3))
-
-        # Add part details only if there's a non-negligible quantity to order
-        if order_qty > 0.001:
-             parts_to_order_details[part_id] = {
-                 "pk": part_id, # Use part_id as pk
-                 "name": part_name,
-                 "total_required": round(total_required, 3), # Store the gross requirement
-                 "available_stock": round(total_available_stock, 3),
-                 "to_order": order_qty, # Store the calculated net requirement
-                 "used_in_assemblies": set(), # Initialize as set
-                 "purchase_orders": [], # Initialize as list
-                 # Add manufacturer/supplier if needed later
-                 "manufacturer_name": part_data.get("manufacturer_name") if part_data else None, # Use correct key
-                 "supplier_names": part_data.get("supplier_names", []) if part_data else [], # Use correct key and get list
-             }
+        # Store details temporarily, to_order will be calculated later in the final loop
+        parts_to_order_details[part_id] = {
+            "pk": part_id, # Use part_id as pk
+            "name": part_name,
+            "total_required": round(total_required, 3), # Store the gross requirement
+            "available_stock": round(total_available_stock, 3),
+            # "to_order": will be calculated later based on saldo
+            "used_in_assemblies": set(), # Initialize as set
+            "purchase_orders": [], # Initialize as list
+            # Add manufacturer/supplier if needed later
+            "manufacturer_name": part_data.get("manufacturer_name") if part_data else None, # Use correct key
+            "supplier_names": part_data.get("supplier_names", []) if part_data else [], # Use correct key and get list
+        }
 
     # --- Collect Root Assembly Names for Needed Parts ---
     for root_id, base_components in required_base_components.items():
@@ -342,9 +337,13 @@ def calculate_required_parts(
         # Add PO data
         details["purchase_orders"] = part_po_data.get(part_id, [])
         # Add 'required_for_order' data
-        details["required_for_order"] = part_requirements_data.get(part_id, 0)
-        # Calculate Saldo
-        details["saldo"] = details["available_stock"] - details["required_for_order"]
+        details["required"] = part_requirements_data.get(part_id, 0) # Renamed key
+        # Calculate Saldo as integer
+        saldo = int(details["available_stock"] - details["required"]) # Use renamed key
+        details["saldo"] = saldo
+        # Calculate 'to_order' based on the integer saldo
+        details["to_order"] = max(0, round(details["total_required"] - saldo, 3))
+
         final_list.append(details)
 
     # --- Apply Exclusions ---
@@ -373,7 +372,12 @@ def calculate_required_parts(
             logging.debug(f"Excluding part {part['pk']} due to manufacturer: {exclude_manufacturer_name}")
             continue # Skip this part
 
-        filtered_list.append(part)
+        # Only add if there's a non-negligible quantity to order based on the new calculation
+        if part.get("to_order", 0) > 0.001:
+            filtered_list.append(part)
+        else:
+            logging.debug(f"Filtering out part {part['pk']} because calculated to_order is {part.get('to_order', 0)}")
+
 
     if excluded_supplier_count > 0:
         logging.info(f"Excluded {excluded_supplier_count} parts from supplier '{exclude_supplier_name}'.")
