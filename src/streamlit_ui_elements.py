@@ -314,13 +314,27 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
 
     st.header("📋 Ergebnisse: Benötigte Teile")
 
-    # Add checkbox to hide BOM consumables
-    hide_bom_consumables = st.checkbox(
-        "BOM-Verbrauchsmaterial ausblenden", # Updated Label
-        value=False,
-        key="hide_bom_consumables_checkbox", # Updated Key
-        help="Blendet Teile aus, die auf einer Stückliste als Verbrauchsmaterial gekennzeichnet sind." # Updated Help Text
-    )
+    # Checkboxes for filtering display
+    col1, col2 = st.columns(2) # Adjusted for two checkboxes
+    with col1:
+        # --- Display Filter: BOM Consumables ---
+        hide_bom_consumables = st.checkbox(
+            "BOM-Verbrauchsmaterial ausblenden",
+            value=st.session_state.get("hide_bom_consumables_checkbox", False), # Persist state
+            key="hide_bom_consumables_checkbox",
+            help="Blendet Teile aus der Anzeige aus, die auf einer Stückliste als Verbrauchsmaterial gekennzeichnet sind."
+        )
+    with col2:
+        # --- Display & Calculation Filter: HAIP Solutions ---
+        # This single checkbox controls both calculation exclusion (handled in app.py)
+        # and display filtering (handled below).
+        exclude_haip_supplier = st.checkbox(
+            "HAIP Solutions Teile ausschließen", # Clearer label
+            value=st.session_state.get("exclude_haip_supplier_checkbox", True), # Default to True, persist state
+            key="exclude_haip_supplier_checkbox",
+            help="Blendet Teile von 'HAIP Solutions GmbH' nur in dieser Tabelle aus. Die Berechnung bleibt unberührt."
+        )
+
 
     if results_list is not None:
         if len(results_list) > 0:
@@ -355,17 +369,40 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
 
             # Proceed with DataFrame manipulation only if valid
 
-            # --- Filter based on checkbox ---
+            # --- Filter based on checkboxes ---
+            df_processed = df_full.copy() # Start with the full data
+
+            # Filter BOM Consumables
             if hide_bom_consumables:
-                # Check if the column exists before filtering
-                if 'is_bom_consumable' in df_full.columns:
-                    df_processed = df_full[df_full['is_bom_consumable'] == False].copy()
+                if 'is_bom_consumable' in df_processed.columns:
+                    df_processed = df_processed[df_processed['is_bom_consumable'] == False]
                 else:
                     st.warning("Spalte 'is_bom_consumable' nicht in den Daten gefunden. Filter kann nicht angewendet werden.")
-                    log.warning("Column 'is_bom_consumable' not found in DataFrame. Skipping filter.")
-                    df_processed = df_full.copy() # Use original data if column missing
-            else:
-                df_processed = df_full.copy()
+                    log.warning("Column 'is_bom_consumable' not found in DataFrame. Skipping BOM consumable filter.")
+
+            # Filter HAIP Parts (Display Only) - Based on the new single checkbox and actual supplier data
+            if exclude_haip_supplier:
+                # Define the supplier name to check against (should match app.py's SUPPLIER_TO_EXCLUDE)
+                supplier_to_exclude_display = "HAIP Solutions GmbH"
+
+                # Check if 'supplier_parts' column exists and is iterable
+                if 'supplier_parts' in df_processed.columns:
+                    # Function to check if any supplier in the list matches the excluded supplier
+                    # Make function slightly more robust
+                    def has_excluded_supplier(supplier_list):
+                        if not isinstance(supplier_list, list):
+                            return False # Not a list, cannot contain the supplier
+                        return any(
+                            isinstance(sp, dict) and sp.get("supplier_name") == supplier_to_exclude_display
+                            for sp in supplier_list
+                        )
+
+                    # Apply the filter: Keep rows that DO NOT have the excluded supplier
+                    df_processed = df_processed[~df_processed['supplier_parts'].apply(has_excluded_supplier)]
+                else:
+                    st.warning("Spalte 'supplier_parts' nicht in den Daten gefunden. HAIP-Teile-Anzeigefilter kann nicht angewendet werden.")
+                    log.warning("Column 'supplier_parts' not found in DataFrame. Skipping HAIP parts display filter.")
+
 
             # --- IMPORTANT: Use df_processed for all subsequent operations ---
 

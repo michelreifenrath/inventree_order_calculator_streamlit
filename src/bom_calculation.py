@@ -1,8 +1,9 @@
 import logging
 from collections import defaultdict
-from typing import Optional, Set
+from typing import Optional, Set, Dict, Any
 from inventree.api import InvenTreeAPI
-from src.inventree_api_helpers import get_part_details, get_bom_items # Absolute import
+# Absolute import - Added get_final_part_data
+from src.inventree_api_helpers import get_part_details, get_bom_items, get_final_part_data
 
 
 def get_recursive_bom(
@@ -16,6 +17,7 @@ def get_recursive_bom(
     sub_assemblies: Optional[defaultdict[int, defaultdict[int, float]]] = None,
     include_consumables: bool = True,
     bom_consumable_status: Optional[dict[int, bool]] = None, # Track BOM line consumable status
+    exclude_haip_calculation: bool = False, # New flag to exclude HAIP parts
 ) -> dict[int, bool]:
     """
     Recursively processes the BOM using cached data fetching functions.
@@ -31,9 +33,10 @@ def get_recursive_bom(
         sub_assemblies (defaultdict): Tracks sub-assemblies needed for each root.
         include_consumables (bool): If False, quantities for parts marked 'consumable' are ignored.
         bom_consumable_status (dict): Tracks if a part was marked consumable on any BOM line.
+        exclude_haip_calculation (bool): If True, parts supplied by HAIP Solutions are excluded from quantity calculations.
 
     Returns:
-        None
+        dict[int, bool]: The updated bom_consumable_status dictionary.
     """
     # Reason: We collect all part IDs to later fetch details in bulk, improving performance.
     all_encountered_part_ids.add(part_id)
@@ -66,8 +69,20 @@ def get_recursive_bom(
                 # Update the tracking dictionary
                 bom_consumable_status[sub_part_id] = bom_consumable_status.get(sub_part_id, False) or is_bom_item_consumable
 
+                # --- HAIP Exclusion Check ---
+                # Check *before* fetching details or adding quantities if exclusion is active
+                if exclude_haip_calculation:
+                    # Fetch final data specifically for this part ID (will use cache)
+                    part_final_data_dict = get_final_part_data(api, (sub_part_id,)) # Use tuple for single ID
+                    part_final_data = part_final_data_dict.get(sub_part_id, {})
+                    is_haip = part_final_data.get('is_haip_part', False)
+                    if is_haip:
+                        logging.debug(f"Excluding HAIP part {sub_part_id} ('{part_final_data.get('name', 'N/A')}') from calculation based on checkbox.")
+                        continue # Skip processing this BOM item entirely if it's a HAIP part
+
+                # --- Continue processing if not excluded ---
                 total_sub_quantity = quantity * sub_quantity_per
-                sub_part_details = get_part_details(api, sub_part_id)
+                sub_part_details = get_part_details(api, sub_part_id) # Fetch basic details
                 if not sub_part_details:
                     logging.warning(
                         f"Skipping sub-part ID {sub_part_id} in BOM for {part_id} due to fetch error."
@@ -136,13 +151,10 @@ def get_recursive_bom(
                             sub_assemblies,
                             include_consumables,
                             bom_consumable_status, # Pass status dict down
+                            exclude_haip_calculation, # Pass flag down
                         )
-                        # Merge the returned status back into the current level's status
-                        # returned_status is the dict from the deeper recursive call
-                        # bom_consumable_status is the dict at the current level
-                        if returned_status: # returned_status is the result of the recursive call
-                            for k, v in returned_status.items():
-                                bom_consumable_status[k] = bom_consumable_status.get(k, False) or v
+                        # The recursive call modifies bom_consumable_status in place,
+                        # so no explicit merging is needed here.
                     else:
                         logging.debug(
                             f"Skipping BOM processing for sub-assembly {sub_part_details.get('name')} (ID: {sub_part_id}) as sufficient stock is available"
@@ -180,6 +192,16 @@ def get_recursive_bom(
         logging.debug(
             f"Adding base component: {part_details.get('name')} (ID: {part_id}), Quantity: {quantity}"
         )
-        required_components[root_input_id][part_id] += quantity
+        # --- HAIP Exclusion Check (for top-level base component) ---
+        is_haip_base = False
+        if exclude_haip_calculation:
+            part_final_data_dict = get_final_part_data(api, (part_id,))
+            part_final_data = part_final_data_dict.get(part_id, {})
+            is_haip_base = part_final_data.get('is_haip_part', False)
+            if is_haip_base:
+                 logging.debug(f"Excluding HAIP base part {part_id} ('{part_details.get('name', 'N/A')}') from calculation.")
+
+        if not is_haip_base: # Only add if not excluded
+            required_components[root_input_id][part_id] += quantity
 
     return bom_consumable_status # Return the updated status dictionary

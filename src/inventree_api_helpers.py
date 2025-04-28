@@ -182,6 +182,7 @@ def get_final_part_data(
             "variant_stock": 0.0,
             "manufacturer_name": None,
             "supplier_names": [],  # Default empty list for suppliers
+            "is_haip_part": False, # Default HAIP flag
         }
 
     # --- Fetch Base Part Data (including manufacturer) ---
@@ -239,6 +240,8 @@ def get_final_part_data(
                     "variant_stock": float(variant_stock),
                     "manufacturer_name": manufacturer_name,
                     "supplier_names": [],  # Initialize suppliers list
+                    "supplier_parts": [], # Initialize detailed supplier parts list
+                    "is_haip_part": False, # Initialize HAIP flag
                 }
             log.info(f"Successfully fetched base details for {len(final_data)} parts.")
 
@@ -268,6 +271,8 @@ def get_final_part_data(
             else:  # Ensure defaults are complete even if partially filled before error
                 final_data[part_id].setdefault("manufacturer_name", None)
                 final_data[part_id].setdefault("supplier_names", [])
+                final_data[part_id].setdefault("supplier_parts", [])
+                final_data[part_id].setdefault("is_haip_part", False) # Ensure default HAIP flag
 
     # --- Fetch Supplier Data using Part objects (Corrected Approach) ---
     if (
@@ -352,12 +357,19 @@ def get_final_part_data(
         log.info("Mapping supplier names back to parts...")
         for part_id in part_ids_to_fetch_suppliers:
             names = set()
+            supplier_part_details = [] # List to store detailed supplier part info
             if part_id in supplier_parts_map:
                 for sp in supplier_parts_map[part_id]:
                     supplier_pk = sp.supplier
                     supplier_name = company_pk_to_name.get(supplier_pk)
                     if supplier_name:
                         names.add(supplier_name.strip())
+                        supplier_part_details.append({
+                            "pk": sp.pk,
+                            "sku": sp.SKU,
+                            "supplier_name": supplier_name.strip(),
+                            "supplier_pk": supplier_pk,
+                        })
                         log.debug(
                             f"Part ID {part_id}: Mapped supplier '{supplier_name}' via SupplierPart PK {sp.pk}"
                         )
@@ -369,18 +381,27 @@ def get_final_part_data(
 
             # Update the final_data dict for this part_id, ensuring it exists
             if part_id in final_data:
-                final_data[part_id]["supplier_names"] = sorted(list(names))
+                supplier_list = sorted(list(names))
+                final_data[part_id]["supplier_names"] = supplier_list
+                final_data[part_id]["supplier_parts"] = supplier_part_details # Add the detailed list
+                # Check if "HAIP Solutions" is among the suppliers
+                final_data[part_id]["is_haip_part"] = "HAIP Solutions" in supplier_list
             else:
                 # This case should ideally not happen if part_objects was populated correctly
                 log.warning(
-                    f"Part ID {part_id} was in fetch list but not in final_data. Setting default supplier names."
+                    f"Part ID {part_id} was in fetch list but not in final_data. Setting default supplier names and HAIP flag."
                 )
                 final_data[part_id] = get_default_data(
                     part_id
                 )  # Add default if missing
-                final_data[part_id]["supplier_names"] = sorted(list(names))
+                supplier_list = sorted(list(names))
+                final_data[part_id]["supplier_names"] = supplier_list
+                final_data[part_id]["supplier_parts"] = supplier_part_details # Add the detailed list even for default
+                # Check if "HAIP Solutions" is among the suppliers even for default entry
+                final_data[part_id]["is_haip_part"] = "HAIP Solutions" in supplier_list
 
-        log.info("Finished mapping supplier names.")
+
+        log.info("Finished mapping supplier names and setting HAIP flag.")
 
     elif not IMPORTS_AVAILABLE:
         log.warning(

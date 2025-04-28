@@ -139,6 +139,7 @@ def calculate_required_parts(
     target_assemblies: Dict[int, float],
     exclude_supplier_name: Optional[str] = None,
     exclude_manufacturer_name: Optional[str] = None,
+    exclude_haip_calculation: bool = False, # New flag for HAIP calculation exclusion
     progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> tuple[List[Dict[str, any]], List[Dict[str, any]], Dict[int, bool]]:
     """
@@ -148,8 +149,9 @@ def calculate_required_parts(
     Args:
         api (InvenTreeAPI): The API connection.
         target_assemblies (dict[int, float]): Mapping of assembly part IDs to quantities.
-        exclude_supplier_name (Optional[str]): Supplier name to exclude.
-        exclude_manufacturer_name (Optional[str]): Manufacturer name to exclude.
+        exclude_supplier_name (Optional[str]): Supplier name to exclude (for final list filtering).
+        exclude_manufacturer_name (Optional[str]): Manufacturer name to exclude (for final list filtering).
+        exclude_haip_calculation (bool): If True, HAIP parts are excluded during BOM recursion.
         progress_callback (Optional[Callable]): Progress update callback.
 
     Returns:
@@ -209,6 +211,7 @@ def calculate_required_parts(
                 required_sub_assemblies,
                 include_consumables=True, # Assuming we always include for calculation, filtering happens later
                 bom_consumable_status=bom_consumable_status, # Pass the status dict
+                exclude_haip_calculation=exclude_haip_calculation, # Pass the HAIP exclusion flag
             )
             # Add the root assembly to the assembly set
             assembly_part_ids.add(int(part_id))
@@ -281,7 +284,8 @@ def calculate_required_parts(
             "purchase_orders": [], # Initialize as list
             # Add manufacturer/supplier if needed later
             "manufacturer_name": part_data.get("manufacturer_name") if part_data else None, # Use correct key
-            "supplier_names": part_data.get("supplier_names", []) if part_data else [],
+            "supplier_names": part_data.get("supplier_names", []) if part_data else [], # Keep this for potential other uses
+            "supplier_parts": part_data.get("supplier_parts", []) if part_data else [], # Add the detailed supplier parts list
             "is_part_consumable": part_data.get("consumable", False) if part_data else False, # Part's own flag
             "is_bom_consumable": False, # Initialize BOM-level flag, will be updated in the final loop
         }
@@ -446,6 +450,14 @@ def calculate_required_parts(
 
     # Count how many sub-assemblies need to be built
     sub_assemblies_to_build = sum(1 for item in sub_assembly_list if item["to_build"] > 0)
+
+    # --- Temporary Debug Log for Part 1909 ---
+    part_1909_data = next((item for item in filtered_list if item.get("pk") == 1909), None)
+    if part_1909_data:
+        logging.info(f"DEBUG: Final data for Part 1909 before return: {part_1909_data}")
+    else:
+        logging.info("DEBUG: Part 1909 not found in the final filtered list to order.")
+    # --- End Temporary Debug Log ---
 
     if progress_callback:
         progress_callback(100, "Berechnung abgeschlossen.")

@@ -1,7 +1,8 @@
 import pytest
 from collections import defaultdict
-from unittest.mock import patch, MagicMock
-from src.bom_calculation import get_recursive_bom # Import from src
+from unittest.mock import patch, MagicMock, call
+# Import from src - Added get_final_part_data for mocking
+from src.bom_calculation import get_recursive_bom, get_final_part_data
 
 
 # Keep DummyAPI for existing basic tests if needed, but new tests will use mocks
@@ -423,3 +424,6 @@ def test_recursive_bom_multi_level_variants(mock_get_part_details, mock_get_bom_
     assert sub_assemblies[root_id][sub_assembly_id] == pytest.approx(required_top_qty * sub_assy_per_top) # Total needed before stock
 
     assert encountered == {top_assembly_id, sub_assembly_id, base_component_id}
+
+
+# (Removed obsolete HAIP exclusion tests that relied on the old flag)

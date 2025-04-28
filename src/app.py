@@ -196,14 +196,8 @@ SUPPLIER_TO_EXCLUDE = "HAIP Solutions GmbH"  # Corrected to supplier name
 # Add a manufacturer to exclude if needed, otherwise leave as None or empty string
 MANUFACTURER_TO_EXCLUDE = ""  # Example: "Example Manufacturer Inc."
 
-# Add checkbox for supplier exclusion
-exclude_supplier = st.checkbox(
-    f"Teile von '{SUPPLIER_TO_EXCLUDE}' ausschließen",
-    value=True,
-    key="exclude_supplier_checkbox",
-)  # Default to True as requested
-
-# Add checkbox for manufacturer exclusion (only if a name is defined)
+# Checkbox for manufacturer exclusion (only if a name is defined)
+# The supplier exclusion checkbox is now handled in streamlit_ui_elements.py
 exclude_manufacturer = False
 if MANUFACTURER_TO_EXCLUDE:
     exclude_manufacturer = st.checkbox(
@@ -261,22 +255,31 @@ if calculate_pressed:
         try:
             # Rufe die Kernlogik auf, übergib den Callback
             # Determine the supplier and manufacturer names to exclude based on checkbox states
-            supplier_to_exclude_arg = SUPPLIER_TO_EXCLUDE if exclude_supplier else None
+            # Determine arguments based on checkbox states
+            # supplier_to_exclude_arg is no longer determined by the HAIP checkbox here
             manufacturer_to_exclude_arg = (
                 MANUFACTURER_TO_EXCLUDE if exclude_manufacturer else None
             )
 
-            # Call the core logic with exclusion parameters
+            # Call the core logic - exclude_supplier_name is no longer passed based on HAIP checkbox
+            # Removed exclude_haip_calculation argument
             parts_to_order, sub_assemblies, _ = calculate_required_parts(
                 api,
                 targets_dict,
-                exclude_supplier_name=supplier_to_exclude_arg,  # Pass supplier exclusion
-                exclude_manufacturer_name=manufacturer_to_exclude_arg,  # Pass manufacturer exclusion
+                # The calculation should no longer be influenced by the HAIP checkbox state.
+                # We only pass manufacturer exclusion if that separate checkbox is active.
+                # exclude_supplier_name=supplier_to_exclude_arg, # Removed HAIP exclusion link
+                exclude_supplier_name=None, # Explicitly set to None, calculation always includes HAIP
+                exclude_manufacturer_name=manufacturer_to_exclude_arg,
                 progress_callback=update_progress,
             )
             # Correct indentation for this block
             st.session_state.results = parts_to_order  # Speichere Ergebnisse im Session State
             st.session_state.sub_assemblies = sub_assemblies  # Speichere Unterbaugruppen im Session State
+
+            # Removed the logic that added 'is_haip_part' flag, as display filtering is now done in streamlit_ui_elements.py
+
+
             # Count how many sub-assemblies need to be built
             sub_assemblies_to_build = sum(1 for item in sub_assemblies if item.get("to_build", 0) > 0)
 
