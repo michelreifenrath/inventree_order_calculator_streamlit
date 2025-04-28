@@ -110,6 +110,7 @@ def get_bom_items(_api: InvenTreeAPI, part_id: int) -> Optional[List[Dict[str, a
                 {
                     "sub_part": item.sub_part,
                     "quantity": float(item.quantity),
+                    "consumable": getattr(item, 'consumable', False), # Added consumable flag
                     "allow_variants": bool(
                         getattr(item, "allow_variants", True)
                     ),  # Assume True if attr missing
