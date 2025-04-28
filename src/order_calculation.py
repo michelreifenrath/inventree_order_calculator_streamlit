@@ -263,17 +263,19 @@ def calculate_required_parts(
         # Note: template_only_flag might be used elsewhere, but not for available stock calculation.
 
         part_available_stock_map[part_id] = total_available_stock # Store for later use
-        # The 'total_required' already represents the net quantity after stock subtraction in get_recursive_bom.
-        # We still fetch 'total_available_stock' for display purposes, but don't subtract it again here.
-        order_qty = round(total_required, 3) if total_required > 0.001 else 0.0
 
-        if order_qty > 0:
+        # Calculate the net quantity to order by subtracting available stock from the gross total_required
+        # total_required now represents the gross requirement from the modified get_recursive_bom
+        order_qty = max(0, round(total_required - total_available_stock, 3))
+
+        # Add part details only if there's a non-negligible quantity to order
+        if order_qty > 0.001:
              parts_to_order_details[part_id] = {
                  "pk": part_id, # Use part_id as pk
                  "name": part_name,
-                 "total_required": round(total_required, 3),
+                 "total_required": round(total_required, 3), # Store the gross requirement
                  "available_stock": round(total_available_stock, 3),
-                 "to_order": order_qty,
+                 "to_order": order_qty, # Store the calculated net requirement
                  "used_in_assemblies": set(), # Initialize as set
                  "purchase_orders": [], # Initialize as list
                  # Add manufacturer/supplier if needed later
