@@ -343,6 +343,7 @@ def calculate_required_parts(
         details["purchase_orders"] = part_po_data.get(part_id, [])
         # Add 'required_for_order' data
         details["required_for_order"] = part_requirements_data.get(part_id, 0)
+        # Saldo calculation removed
         final_list.append(details)
 
     # --- Apply Exclusions ---

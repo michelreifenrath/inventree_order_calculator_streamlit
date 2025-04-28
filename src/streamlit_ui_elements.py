@@ -373,8 +373,8 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
                 "name",
                 "Part URL",  # Hidden link column
                 "total_required",
-                "required_for_order", # Added new column
                 "available_stock",
+                "required_for_order", # Re-added required_for_order
                 "to_order",
                 "used_in_assemblies",
                 "Bestellungen",
@@ -390,8 +390,8 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
                 "Name",
                 "Part ID",  # Header for the URL column
                 "Gesamt benötigt",
-                "Benötigt f. Best.", # Added new header
                 "Auf Lager",
+                "Benötigt f. Best.", # Re-added header
                 "Zu bestellen",
                 "Verwendet in Assemblies",
                 "Bestellungen",
@@ -411,7 +411,7 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
                 "Benötigt f. Best.": st.column_config.NumberColumn(
                     format="%.2f",
                     width="small",
-                    help="Die Menge, die explizit für die aktuelle Bestellung benötigt wird (ohne Berücksichtigung des Lagerbestands für andere Zwecke)."
+                    help="Anzahl, die für die aktuelle Bestellung benötigt wird (basierend auf 'required' aus API)."
                 ),
                 "Bestellungen": st.column_config.TextColumn(width="large"),
                 # Add config for manufacturer/supplier if displayed
@@ -432,8 +432,8 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
                 "pk",
                 "name",
                 "total_required",
-                "required_for_order", # Added new column
                 "available_stock",
+                "required_for_order", # Re-added required_for_order
                 "to_order",
                 "used_in_assemblies",
                 "Bestellungen",  # Formatted PO string
@@ -449,8 +449,8 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
                 "Part ID",
                 "Name",
                 "Gesamt benötigt",
-                "Benötigt f. Best.", # Added new header
                 "Auf Lager",
+                "Benötigt f. Best.", # Re-added header
                 "Zu bestellen",
                 "Verwendet in Assemblies",
                 "Bestellungen",
