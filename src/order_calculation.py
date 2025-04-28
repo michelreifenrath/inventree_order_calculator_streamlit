@@ -140,6 +140,7 @@ def calculate_required_parts(
     exclude_supplier_name: Optional[str] = None,
     exclude_manufacturer_name: Optional[str] = None,
     progress_callback: Optional[Callable[[int, str], None]] = None,
+    include_consumables: bool = True, # New parameter
 ) -> tuple[List[Dict[str, any]], List[Dict[str, any]]]:
     """
     Calculates the list of parts to order based on target assemblies,
@@ -151,11 +152,12 @@ def calculate_required_parts(
         exclude_supplier_name (Optional[str]): Supplier name to exclude.
         exclude_manufacturer_name (Optional[str]): Manufacturer name to exclude.
         progress_callback (Optional[Callable]): Progress update callback.
+        include_consumables (bool): If False, quantities for parts marked 'consumable' are ignored in BOM calculation.
 
     Returns:
-        List[Dict[str, any]]: List of parts to order with details including pk, name,
-                              total_required, available_stock, to_order,
-                              used_in_assemblies, purchase_orders.
+        tuple[List[Dict[str, any]], List[Dict[str, any]]]:
+            - List of parts to order with details.
+            - List of sub-assemblies required.
     """
     if not api:
         logging.error(
@@ -204,6 +206,7 @@ def calculate_required_parts(
                 template_only_flags,
                 all_encountered_part_ids,
                 required_sub_assemblies,  # Pass the sub_assemblies dictionary
+                include_consumables, # Pass the new parameter
             )
             # Add the root assembly to the assembly set
             assembly_part_ids.add(int(part_id))

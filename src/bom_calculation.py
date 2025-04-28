@@ -14,6 +14,7 @@ def get_recursive_bom(
     template_only_flags: defaultdict[int, bool],
     all_encountered_part_ids: Set[int],
     sub_assemblies: defaultdict[int, defaultdict[int, float]] = None,
+    include_consumables: bool = True,  # New parameter
 ) -> None:
     """
     Recursively processes the BOM using cached data fetching functions.
@@ -26,6 +27,8 @@ def get_recursive_bom(
         root_input_id (int): The root assembly ID for grouping.
         template_only_flags (defaultdict[int, bool]): Flags for template-only parts.
         all_encountered_part_ids (set[int]): Set to collect all encountered part IDs.
+        sub_assemblies (defaultdict): Tracks sub-assemblies needed for each root.
+        include_consumables (bool): If False, quantities for parts marked 'consumable' are ignored.
 
     Returns:
         None
@@ -61,14 +64,19 @@ def get_recursive_bom(
                     continue
                 is_template = sub_part_details.get("is_template", False)
                 is_assembly = sub_part_details.get("assembly", False)
+                is_consumable = sub_part_details.get("consumable", False) # Check if the sub-part is consumable
+
                 if is_template and not allow_variants:
                     template_only_flags[sub_part_id] = True
                     logging.debug(
-                        f"Adding template component (variants disallowed): {sub_part_details.get('name')} (ID: {sub_part_id}), Qty: {total_sub_quantity}"
+                        f"Template component (variants disallowed): {sub_part_details.get('name')} (ID: {sub_part_id}), Qty: {total_sub_quantity}, Consumable: {is_consumable}"
                     )
-                    required_components[root_input_id][
-                        sub_part_id
-                    ] += total_sub_quantity
+                    if include_consumables or not is_consumable:
+                        required_components[root_input_id][
+                            sub_part_id
+                        ] += total_sub_quantity
+                    else:
+                        logging.debug(f"Ignoring consumable template quantity for {sub_part_id}")
                 elif is_assembly:
                     # This is a sub-assembly
                     # First, add it to the sub_assemblies dictionary
@@ -113,6 +121,7 @@ def get_recursive_bom(
                             template_only_flags,
                             all_encountered_part_ids,
                             sub_assemblies,
+                            include_consumables, # Pass parameter down
                         )
                     else:
                         logging.debug(
@@ -133,11 +142,14 @@ def get_recursive_bom(
 
                     # Add the gross required quantity directly to the accumulator
                     logging.debug(
-                        f"Adding base component: {sub_part_details.get('name')} (ID: {sub_part_id}), Gross Qty: {total_sub_quantity}"
+                        f"Base component: {sub_part_details.get('name')} (ID: {sub_part_id}), Gross Qty: {total_sub_quantity}, Consumable: {is_consumable}"
                     )
-                    required_components[root_input_id][
-                        sub_part_id
-                    ] += total_sub_quantity
+                    if include_consumables or not is_consumable:
+                        required_components[root_input_id][
+                            sub_part_id
+                        ] += total_sub_quantity
+                    else:
+                        logging.debug(f"Ignoring consumable base component quantity for {sub_part_id}")
         elif bom_items is None:
             logging.warning(
                 f"Could not process BOM for assembly {part_id} due to fetch error."

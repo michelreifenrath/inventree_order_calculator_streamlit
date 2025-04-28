@@ -161,6 +161,13 @@ def render_assembly_inputs(
                 ]
 
 
+# Option to include consumables
+    st.sidebar.checkbox(
+        "Verbrauchsmaterial berücksichtigen",
+        value=True,  # Default to True as per requirement
+        key="include_consumables_checkbox", # Key to access state in app.py
+        help="Berücksichtigt Teile, die als Verbrauchsmaterial gekennzeichnet sind, bei der Bedarfsberechnung."
+    )
 # --- Ergebnisse anzeigen ---
 
 
