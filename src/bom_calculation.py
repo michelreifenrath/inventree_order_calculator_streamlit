@@ -16,7 +16,7 @@ def get_recursive_bom(
     sub_assemblies: Optional[defaultdict[int, defaultdict[int, float]]] = None,
     include_consumables: bool = True,
     bom_consumable_status: Optional[dict[int, bool]] = None, # Track BOM line consumable status
-) -> None:
+) -> dict[int, bool]:
     """
     Recursively processes the BOM using cached data fetching functions.
 
@@ -137,6 +137,12 @@ def get_recursive_bom(
                             include_consumables,
                             bom_consumable_status, # Pass status dict down
                         )
+                        # Merge the returned status back into the current level's status
+                        # returned_status is the dict from the deeper recursive call
+                        # bom_consumable_status is the dict at the current level
+                        if returned_status: # returned_status is the result of the recursive call
+                            for k, v in returned_status.items():
+                                bom_consumable_status[k] = bom_consumable_status.get(k, False) or v
                     else:
                         logging.debug(
                             f"Skipping BOM processing for sub-assembly {sub_part_details.get('name')} (ID: {sub_part_id}) as sufficient stock is available"
@@ -175,3 +181,5 @@ def get_recursive_bom(
             f"Adding base component: {part_details.get('name')} (ID: {part_id}), Quantity: {quantity}"
         )
         required_components[root_input_id][part_id] += quantity
+
+    return bom_consumable_status # Return the updated status dictionary
