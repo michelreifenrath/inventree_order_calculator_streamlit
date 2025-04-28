@@ -389,7 +389,7 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
                 "Name",
                 "Part ID",  # Header for the URL column
                 "Gesamt benötigt",
-                "Verfügbar",
+                "Auf Lager",
                 "Zu bestellen",
                 "Verwendet in Assemblies",
                 "Bestellungen",
@@ -441,7 +441,7 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
                 "Part ID",
                 "Name",
                 "Gesamt benötigt",
-                "Verfügbar",
+                "Auf Lager",
                 "Zu bestellen",
                 "Verwendet in Assemblies",
                 "Bestellungen",
