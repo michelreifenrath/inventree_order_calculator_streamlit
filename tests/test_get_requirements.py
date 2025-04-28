@@ -25,7 +25,7 @@ if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
 # --- Configuration ---
-PART_ID_TO_TEST = 1879 # Part ID to test getRequirements() on
+PART_ID_TO_TEST = 1127 # Part ID to test getRequirements() on
 
 def main():
     """
@@ -53,19 +53,13 @@ def main():
 
         # Fetch the Part object
         print(f"Attempting to retrieve Part with ID: {PART_ID_TO_TEST}")
-        # Fetch the Part object using Part.list() which returns a list
-        print(f"Attempting to retrieve Part with ID: {PART_ID_TO_TEST} using Part.list()")
-        parts_list = Part.list(api, pk=PART_ID_TO_TEST)
+        # Fetch the Part object directly using its ID
+        print(f"Attempting to retrieve Part with ID: {PART_ID_TO_TEST} using Part(api, pk=...)")
+        # This will raise an exception if the part is not found,
+        # which will be caught by the outer try...except block.
+        part = Part(api, pk=PART_ID_TO_TEST)
 
-        # Check if the list is empty (part not found)
-        if not parts_list:
-            print(f"Error: Part with ID {PART_ID_TO_TEST} not found.")
-            sys.exit(1)
-
-        # Get the part object from the list (assuming ID is unique)
-        part = parts_list[0]
-
-        # Proceed with the retrieved part
+        # Proceed with the retrieved part (if found)
         print(f"Successfully retrieved Part: '{part.name}' (ID: {part.pk})")
         print(f"Description: {part.description}")
 

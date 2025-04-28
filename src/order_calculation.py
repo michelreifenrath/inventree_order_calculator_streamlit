@@ -308,7 +308,7 @@ def calculate_required_parts(
         for part_id in part_ids_needing_order:
             try:
                 part_obj = Part(api, pk=part_id)
-                logger.info(f"Processing requirements for Part ID: {part_obj.pk}") # Indent this line
+                logging.info(f"Processing requirements for Part ID: {part_obj.pk}") # Corrected logger and indentation
                 requirements = part_obj.getRequirements()
                 # Ensure requirements is a dict
                 if isinstance(requirements, dict):
