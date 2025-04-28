@@ -8,6 +8,8 @@ import logging
 import os  # Import os module
 from dotenv import load_dotenv  # Import load_dotenv
 
+# --- Streamlit App Konfiguration ---
+st.set_page_config(page_title="InvenTree Order Calculator", layout="wide")
 # Importiere die refaktorierte Logik und UI Elemente
 from inventree_logic import ( # Relative import
     calculate_required_parts,
@@ -32,9 +34,19 @@ from streamlit_ui_elements import ( # Relative import
 from database_helpers import init_db
 from streamlit_ui_elements import render_save_load_controls
 
-# --- Streamlit App Konfiguration ---
-st.set_page_config(page_title="InvenTree Order Calculator", layout="wide")
 st.title("📊 InvenTree Order Calculator")
+# --- Inject Custom CSS ---
+st.markdown(
+    """
+    <style>
+section[data-testid="stSidebar"][aria-expanded="true"] {
+        max-width: 50% !important; /* Apply max-width only when expanded */
+    }
+    /* Add other custom CSS rules below if needed */
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # Initialisiere die Datenbank
 init_db()
