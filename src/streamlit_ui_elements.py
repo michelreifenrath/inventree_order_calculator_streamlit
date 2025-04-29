@@ -193,7 +193,8 @@ def render_sub_assemblies_table(sub_assemblies_list: Optional[List[Dict[str, Any
             df_full = pd.DataFrame(sub_assemblies_list)
 
             # Defensive check: Ensure DataFrame is not empty and has required columns
-            required_cols = {"pk", "name", "quantity", "available_stock", "to_build", "for_assembly"}
+            # Ensure 'verfuegbar' is present, remove 'required_for_order'
+            required_cols = {"pk", "name", "quantity", "available_stock", "verfuegbar", "to_build", "for_assembly"}
 
             if df_full.empty or not required_cols.issubset(df_full.columns):
                 st.error(
@@ -205,17 +206,20 @@ def render_sub_assemblies_table(sub_assemblies_list: Optional[List[Dict[str, Any
                 return  # Stop rendering if data is bad
 
             # Create URL column for linking
+            # TODO: Make base_url configurable?
             base_url = "https://lager.haip.solutions/"
             df_full["Part URL"] = df_full["pk"].apply(
                 lambda pk: f"{base_url}platform/part/{pk}/"
             )
 
             # Select columns for display
+            # Replace 'required_for_order' with 'verfuegbar' after 'available_stock'
             display_columns_ordered = [
                 "name",
                 "Part URL",  # Hidden link column
                 "quantity",
                 "available_stock",
+                "verfuegbar", # New column
                 "to_build",
                 "for_assembly",
             ]
@@ -224,11 +228,13 @@ def render_sub_assemblies_table(sub_assemblies_list: Optional[List[Dict[str, Any
             ]
 
             # Update column headers
+            # Replace 'Benötigt (Bestellung)' with 'Verfügbar'
             df_display.columns = [
                 "Name",
                 "Part ID",  # Header for the URL column
-                "Benötigt",
+                "Benötigt (Gesamt)", # Renamed for clarity
                 "Auf Lager",
+                "Verfügbar", # New header
                 "Zu bauen",
                 "Für Assembly",
             ]
@@ -242,9 +248,10 @@ def render_sub_assemblies_table(sub_assemblies_list: Optional[List[Dict[str, Any
                     help="Klicken, um die Unterbaugruppe in InvenTree zu öffnen",
                     width="small",
                 ),
-                "Benötigt": st.column_config.NumberColumn(format="%.2f", width="small"),
+                "Benötigt (Gesamt)": st.column_config.NumberColumn(format="%.2f", width="small", help="Gesamt benötigte Menge für alle Ziel-Assemblies."),
                 "Auf Lager": st.column_config.NumberColumn(format="%.2f", width="small"),
-                "Zu bauen": st.column_config.NumberColumn(format="%.2f", width="small", help="Anzahl, die gebaut werden muss (Benötigt - Auf Lager)"),
+                "Verfügbar": st.column_config.NumberColumn(format="%.2f", width="small", help="Verfügbarer Bestand nach Abzug des Gesamtbedarfs (kann negativ sein)."), # New config
+                "Zu bauen": st.column_config.NumberColumn(format="%.2f", width="small", help="Anzahl, die gebaut werden muss (Benötigt (Gesamt) - Auf Lager)"), # Updated help text
                 "Für Assembly": st.column_config.TextColumn(width="large"),
             }
 
@@ -256,11 +263,13 @@ def render_sub_assemblies_table(sub_assemblies_list: Optional[List[Dict[str, Any
             )
 
             # CSV Download
+            # Replace 'required_for_order' with 'verfuegbar'
             csv_columns_ordered = [
                 "pk",
                 "name",
                 "quantity",
                 "available_stock",
+                "verfuegbar", # New column
                 "to_build",
                 "for_assembly",
                 "for_assembly_id",
@@ -270,11 +279,13 @@ def render_sub_assemblies_table(sub_assemblies_list: Optional[List[Dict[str, Any
             ]
 
             # Use consistent headers
+            # Replace 'Benötigt (Bestellung)' with 'Verfügbar'
             df_csv.columns = [
                 "Part ID",
                 "Name",
-                "Benötigt",
+                "Benötigt (Gesamt)", # Renamed for clarity
                 "Auf Lager",
+                "Verfügbar", # New header
                 "Zu bauen",
                 "Für Assembly",
                 "Assembly ID",

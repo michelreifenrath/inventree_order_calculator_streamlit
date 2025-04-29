@@ -309,9 +309,16 @@ def calculate_required_parts(
     if progress_callback:
         progress_callback(90, "Fetching 'required for order' data...")
     part_requirements_data = defaultdict(int)
-    if part_ids_needing_order:
-        logging.info(f"Fetching requirements data for {len(part_ids_needing_order)} parts...")
-        for part_id in part_ids_needing_order:
+
+    # --- Combine base part IDs and sub-assembly IDs ---
+    # Sub-assembly IDs are needed to get their own 'required' value for the sub-assembly table
+    all_sub_assembly_ids = {sub_id for subs in required_sub_assemblies.values() for sub_id in subs.keys()}
+    all_ids_for_requirements = set(part_ids_needing_order).union(all_sub_assembly_ids)
+    logging.debug(f"Combined IDs for requirement fetching: {all_ids_for_requirements}") # Added debug log
+
+    if all_ids_for_requirements: # Use the combined set
+        logging.info(f"Fetching requirements data for {len(all_ids_for_requirements)} parts (incl. sub-assemblies)...") # Updated log message
+        for part_id in all_ids_for_requirements: # Iterate over the combined set
             try:
                 part_obj = Part(api, pk=part_id)
                 logging.info(f"Processing requirements for Part ID: {part_obj.pk}") # Corrected logger and indentation
@@ -432,17 +439,26 @@ def calculate_required_parts(
                 total_available_stock = in_stock
             # Note: template_only_flag might be used elsewhere, but not for available stock calculation.
 
-            # Calculate how many need to be built
-            to_build = max(0, qty - total_available_stock)
+            # Fetch the total required quantity for this sub-assembly across the entire order
+            required_val = part_requirements_data.get(sub_id, 0)
+
+            # Calculate 'verfuegbar' (available after fulfilling this order's requirement)
+            # This uses the total required quantity for the sub-assembly across the whole order.
+            verfuegbar = total_available_stock - required_val # Moved calculation up
+
+            # Calculate how many need to be built using 'verfuegbar'
+            to_build = max(0, qty - verfuegbar) # Use 'verfuegbar' in calculation
 
             sub_assembly_list.append({
                 "pk": sub_id,
                 "name": sub_name,
-                "quantity": round(qty, 3),
-                "available_stock": round(total_available_stock, 3),
+                "quantity": round(qty, 3), # This is the required_for_order for this specific root assembly
+                "available_stock": round(total_available_stock, 3), # Total stock across all locations
+                "verfuegbar": round(verfuegbar, 3), # Stock remaining after this order's requirement
                 "to_build": round(to_build, 3),
                 "for_assembly": root_assembly_name,
-                "for_assembly_id": root_id
+                "for_assembly_id": root_id,
+                "required_for_order": round(required_val, 3) # Use the fetched value, rounded for consistency
             })
 
     # Sort the sub-assembly list by name
