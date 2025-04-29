@@ -170,10 +170,11 @@ def calculate_required_parts(
         return [], [], {} # Return empty dict for consumable status
 
     logging.info(f"Calculating required components for targets: {target_assemblies}")
-    required_base_components: defaultdict[int, defaultdict[int, float]] = defaultdict(
+    # Pass 1: Gross calculation to identify all parts
+    gross_required_base_components: defaultdict[int, defaultdict[int, float]] = defaultdict(
         lambda: defaultdict(float)
     )
-    # Dictionary to track required sub-assemblies
+    # Dictionary to track required sub-assemblies (populated in Pass 1)
     required_sub_assemblies: defaultdict[int, defaultdict[int, float]] = defaultdict(
         lambda: defaultdict(float)
     )
@@ -188,72 +189,167 @@ def calculate_required_parts(
     # Fetch root assembly names early for progress callback
     root_assembly_data = get_final_part_data(api, root_assembly_ids)
 
-    # --- Recursive BOM Calculation ---
+    # --- Pass 1: Recursive BOM Calculation (Gross) ---
+    logging.info("Starting Pass 1: Gross BOM Calculation...")
     num_targets = len(target_assemblies)
     for index, (part_id, quantity) in enumerate(target_assemblies.items()):
         if progress_callback and num_targets > 0:
+            # Progress: 10% to 40% for Pass 1
             current_progress = 10 + int(((index + 1) / num_targets) * 30)
             part_name = root_assembly_data.get(part_id, {}).get("name", f"ID {part_id}")
             progress_text = (
-                f"Calculating BOM for '{part_name}' ({index + 1}/{num_targets})"
+                f"Pass 1: Calculating BOM for '{part_name}' ({index + 1}/{num_targets})"
             )
             progress_callback(current_progress, progress_text)
         try:
-            # Pass the assembly_part_ids set to track assemblies
+            # Call get_recursive_bom WITHOUT part_requirements_data for the first pass
             get_recursive_bom(
                 api,
                 int(part_id),
                 float(quantity),
-                required_base_components,
+                gross_required_base_components, # Use gross accumulator
                 int(part_id),
                 template_only_flags,
                 all_encountered_part_ids,
-                required_sub_assemblies,
-                include_consumables=True, # Assuming we always include for calculation, filtering happens later
-                bom_consumable_status=bom_consumable_status, # Pass the status dict
-                exclude_haip_calculation=exclude_haip_calculation, # Pass the HAIP exclusion flag
+                required_sub_assemblies, # Populate sub-assemblies here
+                include_consumables=True,
+                bom_consumable_status=bom_consumable_status, # Populate initial status
+                exclude_haip_calculation=exclude_haip_calculation,
+                part_requirements_data=None, # Explicitly None for Pass 1
             )
-            # Add the root assembly to the assembly set
             assembly_part_ids.add(int(part_id))
         except Exception as e:
-            logging.error(f"Error processing assembly {part_id}: {e}", exc_info=True)
+            logging.error(f"Error during Pass 1 for assembly {part_id}: {e}", exc_info=True)
             continue
+    logging.info("Finished Pass 1.")
 
-    # --- Consolidate Base Components ---
+    # --- Prepare for Requirement Fetching ---
+    # Combine base part IDs from Pass 1 and sub-assembly IDs for requirement fetching
+    all_sub_assembly_ids = {sub_id for subs in required_sub_assemblies.values() for sub_id in subs.keys()}
+    # Ensure all encountered parts (base + roots + subs from pass 1) are included
+    all_ids_for_requirements = all_encountered_part_ids.union(all_sub_assembly_ids).union(set(target_assemblies.keys()))
+    logging.debug(f"Combined IDs for requirement fetching: {all_ids_for_requirements}")
+
+    # --- Fetch 'Required for Order' Data (After Pass 1) ---
+    if progress_callback:
+        progress_callback(45, "Fetching 'required for order' data...") # Adjusted progress
+    part_requirements_data = defaultdict(int)
+    if all_ids_for_requirements:
+        logging.info(f"Fetching requirements data for {len(all_ids_for_requirements)} parts (incl. sub-assemblies)...")
+        for part_id in all_ids_for_requirements:
+            try:
+                part_obj = Part(api, pk=part_id)
+                # logging.info(f"Processing requirements for Part ID: {part_obj.pk}") # Can be verbose
+                requirements = part_obj.getRequirements()
+                if isinstance(requirements, dict):
+                    required_total = requirements.get('required', 0)
+                    required_total_val = 0
+                    try:
+                        required_total_val = int(float(required_total))
+                    except (ValueError, TypeError):
+                         logging.warning(f"Could not convert 'required' value '{required_total}' to int for part {part_id}. Defaulting to 0.")
+                         required_total_val = 0
+                    part_requirements_data[part_id] = required_total_val
+                else:
+                     part_requirements_data[part_id] = 0
+                     logging.warning(f"Requirements data for part {part_id} was not a dictionary.")
+            except Exception as e:
+                logging.error(f"Error fetching requirements for part {part_id}: {e}", exc_info=True)
+                part_requirements_data[part_id] = 0
+    logging.info("Finished fetching requirement data.")
+
+    # --- Pass 2: Recursive BOM Calculation (Net) ---
+    logging.info("Starting Pass 2: Net BOM Calculation...")
+    net_required_base_components: defaultdict[int, defaultdict[int, float]] = defaultdict(
+        lambda: defaultdict(float)
+    )
+    # Clear BOM consumable status for the net pass - it will be repopulated based on net needs
+    bom_consumable_status.clear()
+    # We reuse all_encountered_part_ids (doesn't hurt to add again)
+    # We reuse required_sub_assemblies (already populated)
+    # We reuse template_only_flags - NO! Pass 2 needs isolated structures.
+
+    # Initialize isolated data structures for Pass 2 internal calculations
+    pass2_template_flags = defaultdict(bool)
+    pass2_encountered_ids = set()
+    # Pass 2 doesn't *populate* sub-assemblies, but pass an empty dict of the expected type
+    pass2_sub_assemblies = defaultdict(lambda: defaultdict(float))
+
+    for index, (part_id, quantity) in enumerate(target_assemblies.items()):
+        if progress_callback and num_targets > 0:
+            # Progress: 50% to 80% for Pass 2
+            current_progress = 50 + int(((index + 1) / num_targets) * 30)
+            part_name = root_assembly_data.get(part_id, {}).get("name", f"ID {part_id}")
+            progress_text = (
+                f"Pass 2: Calculating Net BOM for '{part_name}' ({index + 1}/{num_targets})"
+            )
+            progress_callback(current_progress, progress_text)
+        try:
+            # Call get_recursive_bom WITH part_requirements_data for the second pass
+            get_recursive_bom(
+                api,
+                int(part_id),
+                float(quantity),
+                net_required_base_components, # Use NET accumulator
+                int(part_id),
+                pass2_template_flags,       # Use isolated flags for Pass 2
+                pass2_encountered_ids,      # Use isolated encountered set for Pass 2
+                pass2_sub_assemblies,       # Use isolated (empty) sub-assembly dict for Pass 2
+                include_consumables=True,
+                bom_consumable_status=bom_consumable_status, # Repopulate status based on net
+                exclude_haip_calculation=exclude_haip_calculation,
+                part_requirements_data=part_requirements_data, # Pass fetched data
+            )
+            # No need to add to assembly_part_ids again
+        except Exception as e:
+            logging.error(f"Error during Pass 2 for assembly {part_id}: {e}", exc_info=True)
+            continue
+    logging.info("Finished Pass 2.")
+
+
+    # --- Consolidate NET Base Components ---
     total_required_quantities = defaultdict(float)
-    for components in required_base_components.values():
+    for components in net_required_base_components.values(): # Use NET results
         for part_id, qty in components.items():
             total_required_quantities[part_id] += qty
 
     if not total_required_quantities:
-        logging.info("No base components found after BOM processing. Nothing to order.")
-        return [], [], {} # Return empty dict for consumable status
+        logging.info("No base components found after NET BOM processing. Nothing to order.")
+        # Still return the sub-assembly list, it might be needed even if no base parts are.
+        # Fetch details for sub-assemblies if needed for the list?
+        # Let's fetch details for all encountered parts anyway, needed for sub-assembly list too.
+        # return [], [], bom_consumable_status # Return empty dict for consumable status? No, return the potentially repopulated one.
+        pass # Continue processing for sub-assemblies
 
-    # --- Fetch Details for All Encountered Parts ---
+    # --- Fetch Details for All Encountered Parts (Needed for both lists) ---
     if progress_callback:
-        progress_callback(40, "Fetching details for all BOM parts...")
-    all_encountered_part_ids.update(root_assembly_ids)
-    final_part_data = get_final_part_data(api, tuple(all_encountered_part_ids))
+        progress_callback(85, "Fetching details for all BOM parts...") # Adjusted progress
+    # Ensure all IDs from both passes and roots are included for fetching details
+    all_ids_for_details = all_encountered_part_ids.union(all_sub_assembly_ids).union(set(target_assemblies.keys()))
+    final_part_data = get_final_part_data(api, tuple(all_ids_for_details))
 
-    # --- Identify Sub-Assemblies ---
+    # --- Identify Sub-Assemblies (using final_part_data) ---
     # Collect all assemblies that are not root assemblies
+    # assembly_part_ids was populated in Pass 1, reuse it.
     for part_id, part_data in final_part_data.items():
-        if part_data.get("assembly", False) and part_id not in root_assembly_ids:
-            assembly_part_ids.add(part_id)
+         # This logic seems redundant if assembly_part_ids is correctly populated in Pass 1.
+         # Let's rely on required_sub_assemblies keys for the sub-assembly list later.
+         # if part_data.get("assembly", False) and part_id not in root_assembly_ids:
+         #     assembly_part_ids.add(part_id) # Already done in Pass 1
+         pass
 
-    # --- Calculate Stock, Order Need, and Collect Assembly Usage ---
+
+    # --- Calculate Stock, Order Need (Based on NET), and Collect Assembly Usage ---
     if progress_callback:
-        progress_callback(60, "Calculating stock and order amounts...")
+        progress_callback(90, "Calculating stock and order amounts...") # Adjusted progress
     parts_to_order_details = {} # Store final details here {part_id: {details}}
     part_available_stock_map = {} # Store calculated available stock
 
-    # --- Log Sub-Assembly Requirements ---
-    # Log the sub-assemblies that were identified during BOM traversal
-    logging.info(f"Assembly part IDs: {assembly_part_ids}")
-    logging.info(f"Root assembly IDs: {root_assembly_ids}")
-    logging.info(f"Sub-assemblies from BOM traversal: {dict(required_sub_assemblies)}")
+    # Log sub-assembly structure identified in Pass 1
+    logging.info(f"Sub-assemblies from BOM traversal (Pass 1): {dict(required_sub_assemblies)}")
 
-    for part_id, total_required in total_required_quantities.items():
+    # Populate details based on NET required quantities
+    for part_id, net_required in total_required_quantities.items(): # Iterate NET requirements
         part_data = final_part_data.get(part_id)
         if not part_data:
             in_stock, is_template, variant_stock = 0.0, False, 0.0
@@ -264,90 +360,48 @@ def calculate_required_parts(
             variant_stock = part_data.get("variant_stock", 0.0)
             part_name = part_data.get("name", "Unknown")
 
-        # Calculate available stock, prioritizing is_template for including variant stock
+        # Calculate available stock
         if is_template:
             total_available_stock = in_stock + variant_stock
         else:
             total_available_stock = in_stock
-        # Note: template_only_flag might be used elsewhere, but not for available stock calculation.
 
-        part_available_stock_map[part_id] = total_available_stock # Store for later use
+        part_available_stock_map[part_id] = total_available_stock
 
-        # Store details temporarily, to_order will be calculated later in the final loop
+        # Store details based on NET requirements
         parts_to_order_details[part_id] = {
-            "pk": part_id, # Use part_id as pk
+            "pk": part_id,
             "name": part_name,
-            "total_required": round(total_required, 3), # Store the gross requirement
+            "total_required": round(net_required, 3), # Use NET required quantity
             "available_stock": round(total_available_stock, 3),
-            # "to_order": will be calculated later based on saldo
-            "used_in_assemblies": set(), # Initialize as set
-            "purchase_orders": [], # Initialize as list
-            # Add manufacturer/supplier if needed later
-            "manufacturer_name": part_data.get("manufacturer_name") if part_data else None, # Use correct key
-            "supplier_names": part_data.get("supplier_names", []) if part_data else [], # Keep this for potential other uses
-            "supplier_parts": part_data.get("supplier_parts", []) if part_data else [], # Add the detailed supplier parts list
-            "is_part_consumable": part_data.get("consumable", False) if part_data else False, # Part's own flag
-            "is_bom_consumable": False, # Initialize BOM-level flag, will be updated in the final loop
+            "used_in_assemblies": set(), # Initialize, will be populated next
+            "purchase_orders": [],
+            "manufacturer_name": part_data.get("manufacturer_name") if part_data else None,
+            "supplier_names": part_data.get("supplier_names", []) if part_data else [],
+            "supplier_parts": part_data.get("supplier_parts", []) if part_data else [],
+            "is_part_consumable": part_data.get("consumable", False) if part_data else False,
+            "is_bom_consumable": False, # Initialize, updated later from net pass bom_consumable_status
         }
 
-    # --- Collect Root Assembly Names for Needed Parts ---
-    for root_id, base_components in required_base_components.items():
+    # --- Collect Root Assembly Names for NET Needed Parts ---
+    # Use net_required_base_components to determine which root assembly requires which NET base component
+    for root_id, base_components in net_required_base_components.items(): # Use NET results
         root_assembly_name = final_part_data.get(root_id, {}).get(
             "name", f"Unknown Assembly (ID: {root_id})"
         )
         for part_id in base_components.keys():
-            if part_id in parts_to_order_details: # Check if this part needs ordering
+            if part_id in parts_to_order_details: # Check if this part is in the NET required list
                 parts_to_order_details[part_id]["used_in_assemblies"].add(root_assembly_name)
 
-    # --- Fetch Purchase Order Data for Parts Needing Order ---
+    # --- Fetch Purchase Order Data for Parts Potentially Needing Order (Based on NET) ---
     if progress_callback:
-        progress_callback(80, "Fetching purchase order data...")
-    part_ids_needing_order = list(parts_to_order_details.keys())
-    part_po_data = _fetch_purchase_order_data(api, part_ids_needing_order)
+        progress_callback(92, "Fetching purchase order data...") # Adjusted progress
+    part_ids_potentially_needing_order = list(parts_to_order_details.keys()) # IDs from NET calculation
+    part_po_data = _fetch_purchase_order_data(api, part_ids_potentially_needing_order)
 
-    # --- Fetch 'Required for Order' Data ---
-    if progress_callback:
-        progress_callback(90, "Fetching 'required for order' data...")
-    part_requirements_data = defaultdict(int)
+    # Requirement data already fetched before Pass 2
 
-    # --- Combine base part IDs and sub-assembly IDs ---
-    # Sub-assembly IDs are needed to get their own 'required' value for the sub-assembly table
-    all_sub_assembly_ids = {sub_id for subs in required_sub_assemblies.values() for sub_id in subs.keys()}
-    all_ids_for_requirements = set(part_ids_needing_order).union(all_sub_assembly_ids)
-    logging.debug(f"Combined IDs for requirement fetching: {all_ids_for_requirements}") # Added debug log
-
-    if all_ids_for_requirements: # Use the combined set
-        logging.info(f"Fetching requirements data for {len(all_ids_for_requirements)} parts (incl. sub-assemblies)...") # Updated log message
-        for part_id in all_ids_for_requirements: # Iterate over the combined set
-            try:
-                part_obj = Part(api, pk=part_id)
-                logging.info(f"Processing requirements for Part ID: {part_obj.pk}") # Corrected logger and indentation
-
-                # --- Process requirements ---
-                requirements = part_obj.getRequirements()
-                # Ensure requirements is a dict
-                if isinstance(requirements, dict):
-                    # Get the 'required' quantity directly, defaulting to 0 if missing or not numeric
-                    required_total = requirements.get('required', 0)
-                    required_total_val = 0
-                    try:
-                        # Attempt conversion to float first to handle potential decimal strings, then to int
-                        required_total_val = int(float(required_total))
-                    except (ValueError, TypeError):
-                         logging.warning(f"Could not convert 'required' value '{required_total}' to int for part {part_id}. Defaulting to 0. Requirements data: {requirements}")
-                         required_total_val = 0 # Ensure it's 0 if conversion fails
-
-                    part_requirements_data[part_id] = required_total_val
-
-                else:
-                     part_requirements_data[part_id] = 0 # Default if requirements is not a dict
-                     logging.warning(f"Requirements data for part {part_id} was not a dictionary. Data: {requirements}")
-
-            except Exception as e: # Ensure except aligns with try
-                logging.error(f"Error fetching requirements for part {part_id}: {e}", exc_info=True)
-                part_requirements_data[part_id] = 0 # Default to 0 on error
-
-    # --- Build Final List ---
+    # --- Build Final List (Based on NET results) ---
     if progress_callback:
         progress_callback(95, "Finalizing results...")
     final_list = []
@@ -356,15 +410,15 @@ def calculate_required_parts(
         details["used_in_assemblies"] = ", ".join(sorted(list(details["used_in_assemblies"])))
         # Add PO data
         details["purchase_orders"] = part_po_data.get(part_id, [])
-        # Add 'required_for_order' data
+        # Add 'required_for_order' data (fetched before Pass 2)
         details["required"] = part_requirements_data.get(part_id, 0)
-        # Update BOM-level consumable status from the collected dictionary
-        details["is_bom_consumable"] = bom_consumable_status.get(part_id, False)
-        # Calculate Saldo as integer
+        # Update BOM-level consumable status from the NET pass collected dictionary
+        details["is_bom_consumable"] = bom_consumable_status.get(part_id, False) # Use status from NET pass
+        # Calculate Saldo
         saldo = int(details["available_stock"] - details["required"])
         details["saldo"] = saldo
-        # Calculate 'to_order' based on the integer saldo
-        details["to_order"] = max(0, round(details["total_required"] - saldo, 3))
+        # Calculate 'to_order' based on NET total_required and saldo
+        details["to_order"] = max(0, round(details["total_required"] - saldo, 3)) # total_required is already NET
 
         final_list.append(details)
 

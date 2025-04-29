@@ -18,6 +18,7 @@ def get_recursive_bom(
     include_consumables: bool = True,
     bom_consumable_status: Optional[dict[int, bool]] = None, # Track BOM line consumable status
     exclude_haip_calculation: bool = False, # New flag to exclude HAIP parts
+    part_requirements_data: Optional[Dict[int, int]] = None, # New: Requirements for parts
 ) -> dict[int, bool]:
     """
     Recursively processes the BOM using cached data fetching functions.
@@ -34,6 +35,7 @@ def get_recursive_bom(
         include_consumables (bool): If False, quantities for parts marked 'consumable' are ignored.
         bom_consumable_status (dict): Tracks if a part was marked consumable on any BOM line.
         exclude_haip_calculation (bool): If True, parts supplied by HAIP Solutions are excluded from quantity calculations.
+        part_requirements_data (Optional[Dict[int, int]]): Dictionary mapping part IDs to their required quantity for the order. Defaults to None.
 
     Returns:
         dict[int, bool]: The updated bom_consumable_status dictionary.
@@ -113,6 +115,7 @@ def get_recursive_bom(
                     )
                     # Add to sub-assemblies tracking
                     sub_assemblies[root_input_id][sub_part_id] += total_sub_quantity
+                    logging.info(f"REC_BOM_DEBUG: Added/Updated sub_assembly[{root_input_id}][{sub_part_id}] = {sub_assemblies[root_input_id][sub_part_id]}")
 
                     # Check stock for this sub-assembly first
                     in_stock = sub_part_details.get("in_stock", 0.0)
@@ -127,11 +130,19 @@ def get_recursive_bom(
                         available_stock = in_stock
                         logging.debug(f"Sub-assembly {sub_part_id}: Not allowing variants, Available Stock = {in_stock}")
 
-                    # Calculate how many need to be built
-                    to_build = max(0, total_sub_quantity - available_stock)
+                    # Fetch requirement for this sub-assembly
+                    required_val = part_requirements_data.get(sub_part_id, 0) if part_requirements_data else 0
+                    logging.debug(f"Sub-assembly {sub_part_id}: Required for order = {required_val}")
+
+                    # Calculate effective available stock ('verfuegbar')
+                    verfuegbar = available_stock - required_val
+                    logging.debug(f"Sub-assembly {sub_part_id}: Effective Available Stock (verfuegbar) = {available_stock} - {required_val} = {verfuegbar}")
+
+                    # Calculate how many need to be built based on effective stock
+                    to_build = max(0, total_sub_quantity - verfuegbar)
 
                     logging.debug(
-                        f"Sub-assembly {sub_part_details.get('name')} (ID: {sub_part_id}): Need {total_sub_quantity}, Available {available_stock}, To Build {to_build}"
+                        f"Sub-assembly {sub_part_details.get('name')} (ID: {sub_part_id}): Need {total_sub_quantity}, Effective Available {verfuegbar}, To Build {to_build}"
                     )
 
                     # Only process BOM for the quantity that needs to be built
@@ -148,10 +159,11 @@ def get_recursive_bom(
                             root_input_id,
                             template_only_flags,
                             all_encountered_part_ids,
-                            sub_assemblies,
-                            include_consumables,
-                            bom_consumable_status, # Pass status dict down
-                            exclude_haip_calculation, # Pass flag down
+                            sub_assemblies, # Pass down sub_assemblies tracker
+                            include_consumables, # Pass down include_consumables flag
+                            bom_consumable_status, # Pass down bom_consumable_status
+                            exclude_haip_calculation, # Pass down exclude_haip_calculation flag
+                            part_requirements_data, # Pass down part requirements data
                         )
                         # The recursive call modifies bom_consumable_status in place,
                         # so no explicit merging is needed here.
@@ -203,5 +215,6 @@ def get_recursive_bom(
 
         if not is_haip_base: # Only add if not excluded
             required_components[root_input_id][part_id] += quantity
+    logging.info(f"REC_BOM_DEBUG: Returning from part {part_id}. Current sub_assemblies state: {dict(sub_assemblies)}")
 
     return bom_consumable_status # Return the updated status dictionary
