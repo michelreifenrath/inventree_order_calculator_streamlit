@@ -1,6 +1,6 @@
 # InvenTree Order Calculator
 
-This project provides an interactive Streamlit web application to calculate the required base components needed to build a set of specified assembly parts, based on Bill of Materials (BOM) data fetched from an InvenTree instance. It determines the quantity of each base part to order by comparing the total required quantity against the current stock level (including parts on pending/placed purchase orders) in InvenTree.
+This project provides an interactive Streamlit web application to calculate the required base components and sub-assemblies needed to build a set of specified top-level assembly parts, based on Bill of Materials (BOM) data fetched from an InvenTree instance. It determines the quantity of each base part to order and each sub-assembly to build by comparing the total required quantity against the current *effective* stock level (considering existing stock and quantities already allocated for other orders/builds) in InvenTree.
 
 ## Features
 
@@ -8,11 +8,19 @@ This project provides an interactive Streamlit web application to calculate the 
 - Allows users to select target assembly parts from a dropdown menu (populated from a configurable InvenTree category).
 - Users can define the desired quantity for each selected assembly part.
 - Multiple assembly parts can be added to the calculation list.
-- Recursively calculates the total required quantity for each base component based on the BOMs of the target assemblies.
+- Recursively calculates the total required quantity for each base component and intermediate sub-assembly based on the BOMs of the target assemblies.
+- **Calculates and displays required sub-assemblies**, showing:
+    - Total quantity needed across all target assemblies.
+    - Current stock on hand.
+    - Quantity already allocated/required for other orders/builds (fetched from InvenTree).
+    - Effective available stock (`Verfügbar` = Stock - Required for Order).
+    - Net quantity that needs to be built (`Zu bauen` = Total Needed - Verfügbar).
+- **Calculates net base component requirements** by considering the effective available stock of intermediate sub-assemblies, preventing over-ordering of base parts.
+- **Correctly handles shared sub-assemblies** by aggregating their total requirement across all parent assemblies before calculating build needs and component requirements.
 - Fetches current stock levels and quantities on pending/placed purchase orders for base components from InvenTree.
-- Option to exclude parts based on specific Suppliers or Manufacturers.
-- Displays the final list of parts that need to be ordered, grouped by the initial input assembly, with clear quantity breakdowns.
-- Allows downloading the grouped order list (including input assembly information) as a CSV file.
+- Option to exclude parts based on specific Suppliers or Manufacturers (display filter).
+- Displays the final list of base parts that need to be ordered and sub-assemblies to be built.
+- Allows downloading the order lists (base parts and sub-assemblies) as CSV files.
 - Uses Streamlit caching (`@st.cache_data`, `@st.cache_resource`) to optimize performance by reducing redundant API calls.
 - Includes a "Restart Calculation" button to clear results and start over.
 - Dockerized for easy deployment and consistent environment (`Dockerfile`, `docker-compose.yml`).
@@ -27,6 +35,7 @@ This project provides an interactive Streamlit web application to calculate the 
 ├── src/                     # Core application source code
 │   ├── app.py                   # Main Streamlit application entrypoint
 │   ├── bom_calculation.py       # Logic for recursive BOM calculation
+│   ├── database_helpers.py      # Helper functions for local DB (saving/loading)
 │   ├── inventree_api_helpers.py # Helper functions for InvenTree API interaction
 │   ├── inventree_logic.py       # Core logic coordination (legacy/refactored)
 │   ├── order_calculation.py     # Logic for calculating required order quantities
@@ -65,22 +74,23 @@ cd inventree-order-calculator
   ```bash
   cp .env.example .env
   ```
+- Edit the `.env` file with your InvenTree URL and API Token:
   ```dotenv
-  INVENTREE_SERVER=https://your-inventree-instance.com
-  INVENTREE_API_TOKEN=your_api_token_here
+  INVENTREE_URL="https://your-inventree-instance.com"
+  INVENTREE_TOKEN="your_api_token_here"
   # Optional: Specify the category ID for the assembly dropdown
-  TARGET_ASSEMBLY_CATEGORY_ID=191
+  # TARGET_ASSEMBLY_CATEGORY_ID=191
   ```
 
 ### 4. Install Dependencies
 
 - Create and activate a virtual environment (recommended):
   ```bash
-  python -m venv <your_virtual_env_name> # e.g., venv
+  python -m venv .venv # Create .venv
   # On Windows
-  .\<your_virtual_env_name>\Scripts\activate
+  .\.venv\Scripts\activate
   # On macOS/Linux
-  source <your_virtual_env_name>/bin/activate
+  source .venv/bin/activate
   ```
 - Install the required Python packages:
   ```bash
