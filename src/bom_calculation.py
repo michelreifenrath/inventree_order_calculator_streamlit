@@ -19,6 +19,8 @@ def get_recursive_bom(
     bom_consumable_status: Optional[dict[int, bool]] = None, # Track BOM line consumable status
     exclude_haip_calculation: bool = False, # New flag to exclude HAIP parts
     part_requirements_data: Optional[Dict[int, int]] = None, # New: Requirements for parts
+    total_sub_assembly_reqs: Optional[Dict[int, float]] = None, # New: Aggregated requirements for sub-assemblies
+    processed_net_subassemblies: Optional[Set[int]] = None, # New: Track processed sub-assemblies in Pass 2
 ) -> dict[int, bool]:
     """
     Recursively processes the BOM using cached data fetching functions.
@@ -36,6 +38,8 @@ def get_recursive_bom(
         bom_consumable_status (dict): Tracks if a part was marked consumable on any BOM line.
         exclude_haip_calculation (bool): If True, parts supplied by HAIP Solutions are excluded from quantity calculations.
         part_requirements_data (Optional[Dict[int, int]]): Dictionary mapping part IDs to their required quantity for the order. Defaults to None.
+        total_sub_assembly_reqs (Optional[Dict[int, float]]): Dictionary mapping sub-assembly part IDs to their total aggregated required quantity across all parent paths. Used in Pass 2. Defaults to None.
+        processed_net_subassemblies (Optional[Set[int]]): A set containing the IDs of sub-assemblies whose net requirements have already been calculated in the current Pass 2 run. Defaults to None.
 
     Returns:
         dict[int, bool]: The updated bom_consumable_status dictionary.
@@ -138,15 +142,27 @@ def get_recursive_bom(
                     verfuegbar = available_stock - required_val
                     logging.debug(f"Sub-assembly {sub_part_id}: Effective Available Stock (verfuegbar) = {available_stock} - {required_val} = {verfuegbar}")
 
-                    # Calculate how many need to be built based on effective stock
-                    to_build = max(0, total_sub_quantity - verfuegbar)
+                    # Calculate how many need to be built based on effective stock and TOTAL aggregated requirement
+                    # Use the aggregated requirement if provided (Pass 2), otherwise use the requirement from this specific path (Pass 1)
+                    aggregated_qty = total_sub_assembly_reqs.get(sub_part_id, 0) if total_sub_assembly_reqs else total_sub_quantity
+                    to_build = max(0, aggregated_qty - verfuegbar)
 
                     logging.debug(
-                        f"Sub-assembly {sub_part_details.get('name')} (ID: {sub_part_id}): Need {total_sub_quantity}, Effective Available {verfuegbar}, To Build {to_build}"
+                        f"Sub-assembly {sub_part_details.get('name')} (ID: {sub_part_id}): Path Need {total_sub_quantity}, Aggregated Need {aggregated_qty}, Effective Available {verfuegbar}, To Build {to_build}"
                     )
+
+                    # Pass 2 Check: Skip if this sub-assembly's net components were already calculated
+                    if processed_net_subassemblies is not None and sub_part_id in processed_net_subassemblies:
+                        logging.debug(f"Skipping already processed net sub-assembly: {sub_part_id}")
+                        continue # Skip to the next BOM item
 
                     # Only process BOM for the quantity that needs to be built
                     if to_build > 0:
+                        # Pass 2: Mark this sub-assembly as processed for net calculation
+                        if processed_net_subassemblies is not None:
+                            processed_net_subassemblies.add(sub_part_id)
+                            logging.debug(f"Marking sub-assembly {sub_part_id} as processed for net calculation.")
+
                         # Recursively process its BOM, but only for the quantity that needs to be built
                         logging.debug(
                             f"Recursively processing BOM for sub-assembly {sub_part_details.get('name')} (ID: {sub_part_id}), To Build Qty: {to_build}"
@@ -164,6 +180,8 @@ def get_recursive_bom(
                             bom_consumable_status, # Pass down bom_consumable_status
                             exclude_haip_calculation, # Pass down exclude_haip_calculation flag
                             part_requirements_data, # Pass down part requirements data
+                            total_sub_assembly_reqs, # Pass down aggregated requirements
+                            processed_net_subassemblies=processed_net_subassemblies, # Pass down the set
                         )
                         # The recursive call modifies bom_consumable_status in place,
                         # so no explicit merging is needed here.

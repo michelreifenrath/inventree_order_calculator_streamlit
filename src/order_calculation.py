@@ -223,6 +223,18 @@ def calculate_required_parts(
             continue
     logging.info("Finished Pass 1.")
 
+    # --- Aggregate Sub-Assembly Requirements (After Pass 1) ---
+    aggregated_sub_totals: Dict[int, float] = defaultdict(float)
+    sub_to_roots_map: Dict[int, Set[int]] = defaultdict(set)
+    logging.info("Aggregating total requirements for each sub-assembly...")
+    for root_id, subs in required_sub_assemblies.items():
+        for sub_id, qty in subs.items():
+            aggregated_sub_totals[sub_id] += qty
+            sub_to_roots_map[sub_id].add(root_id)
+    logging.info(f"Aggregated sub-assembly totals: {dict(aggregated_sub_totals)}")
+    logging.info(f"Sub-assembly to root map: {dict(sub_to_roots_map)}")
+
+
     # --- Prepare for Requirement Fetching ---
     # Combine base part IDs from Pass 1 and sub-assembly IDs for requirement fetching
     all_sub_assembly_ids = {sub_id for subs in required_sub_assemblies.values() for sub_id in subs.keys()}
@@ -275,6 +287,8 @@ def calculate_required_parts(
     # Pass 2 doesn't *populate* sub-assemblies, but pass an empty dict of the expected type
     pass2_sub_assemblies = defaultdict(lambda: defaultdict(float))
 
+    processed_subassemblies_in_pass2 = set() # Initialize set for tracking processed sub-assemblies in Pass 2
+
     for index, (part_id, quantity) in enumerate(target_assemblies.items()):
         if progress_callback and num_targets > 0:
             # Progress: 50% to 80% for Pass 2
@@ -299,11 +313,14 @@ def calculate_required_parts(
                 bom_consumable_status=bom_consumable_status, # Repopulate status based on net
                 exclude_haip_calculation=exclude_haip_calculation,
                 part_requirements_data=part_requirements_data, # Pass fetched data
+                total_sub_assembly_reqs=aggregated_sub_totals, # Pass aggregated totals for 'to_build' calculation
+                processed_net_subassemblies=processed_subassemblies_in_pass2, # Pass the tracking set
             )
             # No need to add to assembly_part_ids again
         except Exception as e:
             logging.error(f"Error during Pass 2 for assembly {part_id}: {e}", exc_info=True)
             continue
+    logging.info(f"DEBUG: net_required_base_components after Pass 2: {dict(net_required_base_components)}")
     logging.info("Finished Pass 2.")
 
 
@@ -312,6 +329,8 @@ def calculate_required_parts(
     for components in net_required_base_components.values(): # Use NET results
         for part_id, qty in components.items():
             total_required_quantities[part_id] += qty
+
+    logging.info(f"DEBUG: total_required_quantities after consolidation: {dict(total_required_quantities)}")
 
     if not total_required_quantities:
         logging.info("No base components found after NET BOM processing. Nothing to order.")
@@ -469,51 +488,57 @@ def calculate_required_parts(
     # Log the contents of required_sub_assemblies for debugging
     logging.info(f"Required sub-assemblies: {dict(required_sub_assemblies)}")
 
-    # Process the sub-assemblies that were collected during BOM traversal
-    for root_id, sub_assemblies in required_sub_assemblies.items():
-        root_assembly_name = final_part_data.get(root_id, {}).get(
-            "name", f"Unknown Assembly (ID: {root_id})"
-        )
+    # Process the sub-assemblies using the aggregated totals
+    logging.info("Generating final sub-assembly list based on aggregated totals...")
+    for sub_id, total_qty in aggregated_sub_totals.items():
+        # Get the sub-assembly name
+        sub_name = final_part_data.get(sub_id, {}).get("name", f"Unknown (ID: {sub_id})")
 
-        for sub_id, qty in sub_assemblies.items():
-            # Get the sub-assembly name
-            sub_name = final_part_data.get(sub_id, {}).get("name", f"Unknown (ID: {sub_id})")
-            logging.info(f"Adding sub-assembly to list: {sub_name} (ID: {sub_id}) x{qty} for {root_assembly_name}")
+        # Get stock information for this sub-assembly
+        sub_part_data = final_part_data.get(sub_id, {})
+        in_stock = sub_part_data.get("in_stock", 0.0)
+        is_template = sub_part_data.get("is_template", False)
+        variant_stock = sub_part_data.get("variant_stock", 0.0)
 
-            # Get stock information for this sub-assembly
-            sub_part_data = final_part_data.get(sub_id, {})
-            in_stock = sub_part_data.get("in_stock", 0.0)
-            is_template = sub_part_data.get("is_template", False)
-            variant_stock = sub_part_data.get("variant_stock", 0.0)
+        # Calculate available stock
+        if is_template:
+            total_available_stock = in_stock + variant_stock
+        else:
+            total_available_stock = in_stock
 
-            # Calculate available stock, prioritizing is_template for including variant stock
-            if is_template:
-                total_available_stock = in_stock + variant_stock
-            else:
-                total_available_stock = in_stock
-            # Note: template_only_flag might be used elsewhere, but not for available stock calculation.
+        # Fetch the total required quantity for this sub-assembly across the entire order (external demand)
+        required_val = part_requirements_data.get(sub_id, 0)
 
-            # Fetch the total required quantity for this sub-assembly across the entire order
-            required_val = part_requirements_data.get(sub_id, 0)
+        # Calculate 'verfuegbar' (available after fulfilling external requirements)
+        verfuegbar = total_available_stock - required_val
 
-            # Calculate 'verfuegbar' (available after fulfilling this order's requirement)
-            # This uses the total required quantity for the sub-assembly across the whole order.
-            verfuegbar = total_available_stock - required_val # Moved calculation up
+        # Calculate how many need to be built based on the aggregated total need for *this* calculation run
+        # and the stock available after external requirements ('verfuegbar')
+        # Note: get_recursive_bom in Pass 2 already used aggregated_sub_totals to calculate its internal 'to_build'
+        # This calculation here is for the final summary list.
+        to_build = max(0, total_qty - verfuegbar)
 
-            # Calculate how many need to be built using 'verfuegbar'
-            to_build = max(0, qty - verfuegbar) # Use 'verfuegbar' in calculation
+        # Get the names of the root assemblies requiring this sub-assembly
+        parent_root_ids = sub_to_roots_map.get(sub_id, set())
+        parent_assembly_names = sorted([
+            final_part_data.get(root_id, {}).get("name", f"Unknown (ID: {root_id})")
+            for root_id in parent_root_ids
+        ])
+        for_assembly_str = ", ".join(parent_assembly_names)
 
-            sub_assembly_list.append({
-                "pk": sub_id,
-                "name": sub_name,
-                "quantity": round(qty, 3), # This is the required_for_order for this specific root assembly
-                "available_stock": round(total_available_stock, 3), # Total stock across all locations
-                "verfuegbar": round(verfuegbar, 3), # Stock remaining after this order's requirement
-                "to_build": round(to_build, 3),
-                "for_assembly": root_assembly_name,
-                "for_assembly_id": root_id,
-                "required_for_order": round(required_val, 3) # Use the fetched value, rounded for consistency
-            })
+        logging.info(f"Adding aggregated sub-assembly to list: {sub_name} (ID: {sub_id}) x{total_qty} for [{for_assembly_str}]")
+
+        sub_assembly_list.append({
+            "pk": sub_id,
+            "name": sub_name,
+            "quantity": round(total_qty, 3), # Total aggregated quantity needed for this calculation
+            "available_stock": round(total_available_stock, 3), # Total stock across all locations
+            "verfuegbar": round(verfuegbar, 3), # Stock remaining after external requirements
+            "to_build": round(to_build, 3), # How many to build based on aggregated need and 'verfuegbar'
+            "for_assembly": for_assembly_str, # Comma-separated list of parent assemblies
+            "for_assembly_id": list(parent_root_ids), # Optional: include IDs if needed elsewhere
+            "required_for_order": round(required_val, 3) # External requirement value
+        })
 
     # Sort the sub-assembly list by name
     sub_assembly_list.sort(key=lambda x: x["name"])
