@@ -164,7 +164,7 @@ def render_assembly_inputs(
 # --- Ergebnisse anzeigen ---
 
 
-def render_results_table(results_list: Optional[List[Dict[str, Any]]]) -> None:
+def render_results_table(results_list: Optional[List[Dict[str, Any]]], link_style: str = "New GUI (/platform/..)") -> None:
     """
     Renders the results table and CSV download button.
 
@@ -172,10 +172,13 @@ def render_results_table(results_list: Optional[List[Dict[str, Any]]]) -> None:
         results_list: The list of dictionaries containing parts to order,
                       or None if no calculation has been run or an error occurred.
     """
-    render_parts_to_order_table(results_list)
+    render_parts_to_order_table(results_list, link_style=link_style)
 
 
-def render_sub_assemblies_table(sub_assemblies_list: Optional[List[Dict[str, Any]]]) -> None:
+def render_sub_assemblies_table(
+    sub_assemblies_list: Optional[List[Dict[str, Any]]],
+    link_style: str = "New GUI (/platform/..)", # Added link_style argument
+) -> None:
     """
     Renders a table showing required sub-assemblies.
 
@@ -205,11 +208,13 @@ def render_sub_assemblies_table(sub_assemblies_list: Optional[List[Dict[str, Any
                 )
                 return  # Stop rendering if data is bad
 
+            # Determine URL prefix based on link style
+            base_url = "https://lager.haip.solutions" # Remove trailing slash
+            url_prefix = "/platform/part" if "New GUI" in link_style else "/part"
+
             # Create URL column for linking
-            # TODO: Make base_url configurable?
-            base_url = "https://lager.haip.solutions/"
             df_full["Part URL"] = df_full["pk"].apply(
-                lambda pk: f"{base_url}platform/part/{pk}/"
+                lambda pk: f"{base_url}{url_prefix}/{pk}/" # Use url_prefix
             )
 
             # Select columns for display
@@ -239,12 +244,19 @@ def render_sub_assemblies_table(sub_assemblies_list: Optional[List[Dict[str, Any
                 "Für Assembly",
             ]
 
+            # Determine display regex based on link style
+            base_url_display = "https://lager.haip.solutions" # For display regex
+            url_prefix_display = "/platform/part" if "New GUI" in link_style else "/part"
+            display_regex = rf"^{base_url_display}{url_prefix_display}/(\d+)/$" # Use url_prefix_display
+
             # Configure columns for st.data_editor
             column_config = {
                 "Name": st.column_config.TextColumn(width="large"),
                 "Part ID": st.column_config.LinkColumn(
-                    display_text=r"https://lager.haip.solutions/platform/part/(\d+)/",
-                    validate=r"^https://lager.haip.solutions/platform/part/\d+/$",
+                    # display_text=r"https://lager.haip.solutions/platform/part/(\d+)/", # Old static regex
+                    display_text=display_regex, # Use dynamic regex
+                    # validate=r"^https://lager.haip.solutions/platform/part/\d+/$", # Validate might need adjustment too if base_url changes
+                    validate=display_regex, # Use the same regex for validation for now
                     help="Klicken, um die Unterbaugruppe in InvenTree zu öffnen",
                     width="small",
                 ),
@@ -313,7 +325,10 @@ def render_sub_assemblies_table(sub_assemblies_list: Optional[List[Dict[str, Any
         st.info("Klicke auf 'Teilebedarf berechnen', um die Ergebnisse anzuzeigen.")
 
 
-def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) -> None:
+def render_parts_to_order_table(
+    results_list: Optional[List[Dict[str, Any]]],
+    link_style: str = "New GUI (/platform/..)", # Added link_style argument
+) -> None:
     """
     Renders the table of parts to order and CSV download button.
 
@@ -439,12 +454,13 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
                     )
                 )
 
-                # Create URL column for linking
-                # TODO: Make base_url configurable?
-                base_url = "https://lager.haip.solutions/"
-                # Use df_processed
+                # Determine URL prefix based on link style
+                base_url = "https://lager.haip.solutions" # Remove trailing slash
+                url_prefix = "/platform/part" if "New GUI" in link_style else "/part"
+
+                # Create URL column for linking using df_processed
                 df_processed["Part URL"] = df_processed["pk"].apply(
-                    lambda pk: f"{base_url}platform/part/{pk}/"
+                    lambda pk: f"{base_url}{url_prefix}/{pk}/" # Use url_prefix
                 )
 
                 # Select columns for display (including Name and the hidden URL)
@@ -482,12 +498,19 @@ def render_parts_to_order_table(results_list: Optional[List[Dict[str, Any]]]) ->
                     # "BOM Konsum?", # Optional header for the flag
                 ]
 
+                # Determine display regex based on link style
+                base_url_display = "https://lager.haip.solutions" # For display regex
+                url_prefix_display = "/platform/part" if "New GUI" in link_style else "/part"
+                display_regex = rf"^{base_url_display}{url_prefix_display}/(\d+)/$" # Use url_prefix_display
+
                 # Configure columns for st.data_editor
                 column_config = {
                     "Name": st.column_config.TextColumn(width="large"),
                     "Part ID": st.column_config.LinkColumn(
-                        display_text=r"https://lager.haip.solutions/platform/part/(\d+)/",
-                        validate=r"^https://lager.haip.solutions/platform/part/\d+/$",
+                        # display_text=r"https://lager.haip.solutions/platform/part/(\d+)/", # Old static regex
+                        display_text=display_regex, # Use dynamic regex
+                        # validate=r"^https://lager.haip.solutions/platform/part/\d+/$", # Validate might need adjustment too if base_url changes
+                        validate=display_regex, # Use the same regex for validation for now
                         help="Klicken, um das Teil in InvenTree zu öffnen",
                         width="small",
                     ),

@@ -206,6 +206,15 @@ if MANUFACTURER_TO_EXCLUDE:
         key="exclude_manufacturer_checkbox",
     )
 
+# Option to select InvenTree link style
+st.radio(
+    "Link-Stil für InvenTree",
+    options=["New GUI (/platform/..)", "Old GUI (/part/..)"],
+    key="link_style_choice",
+    index=0,  # Default to "New GUI"
+    horizontal=True,
+    help="Wählen Sie den Link-Stil für Verweise auf InvenTree-Teile. 'New GUI' verwendet den Pfad `/platform/part/{pk}/`, 'Old GUI' verwendet `/part/{pk}/`.",
+)
 
 # --- Calculation and Reset Buttons ---
 # Buttons in Spalten anordnen
@@ -311,10 +320,10 @@ if calculate_pressed:
 
 # --- Ergebnisse anzeigen ---
 # Call the functions from the UI elements module to render the results
-render_results_table(st.session_state.get("results"))
+render_results_table(st.session_state.get("results"), link_style=st.session_state.get("link_style_choice", "New GUI (/platform/..)"))
 
 # Render the sub-assemblies table
-render_sub_assemblies_table(st.session_state.get("sub_assemblies"))
+render_sub_assemblies_table(st.session_state.get("sub_assemblies"), link_style=st.session_state.get("link_style_choice", "New GUI (/platform/..)"))
 
 # Optional: Auto-refresh (siehe IDEA.md für Details zur Implementierung)
 # from streamlit_autorefresh import st_autorefresh
