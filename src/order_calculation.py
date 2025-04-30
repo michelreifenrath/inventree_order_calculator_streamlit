@@ -510,13 +510,15 @@ def calculate_required_parts(
         required_val = part_requirements_data.get(sub_id, 0)
 
         # Calculate 'verfuegbar' (available after fulfilling external requirements)
-        verfuegbar = total_available_stock - required_val
+        verfuegbar = total_available_stock - required_val # Stock - external demand
 
+        # Get the quantity currently being built for this sub-assembly
+        building_qty = sub_part_data.get("building", 0.0)
         # Calculate how many need to be built based on the aggregated total need for *this* calculation run
         # and the stock available after external requirements ('verfuegbar')
-        # Note: get_recursive_bom in Pass 2 already used aggregated_sub_totals to calculate its internal 'to_build'
-        # This calculation here is for the final summary list.
-        to_build = max(0, total_qty - verfuegbar)
+        # Consider the quantity already in build orders as effectively 'available' for meeting the total need.
+        effective_available_for_build = verfuegbar + building_qty
+        to_build = max(0, total_qty - effective_available_for_build)
 
         # Get the names of the root assemblies requiring this sub-assembly
         parent_root_ids = sub_to_roots_map.get(sub_id, set())
@@ -534,6 +536,7 @@ def calculate_required_parts(
             "quantity": round(total_qty, 3), # Total aggregated quantity needed for this calculation
             "available_stock": round(total_available_stock, 3), # Total stock across all locations
             "verfuegbar": round(verfuegbar, 3), # Stock remaining after external requirements
+            "building": round(building_qty, 3), # Add the quantity currently being built
             "to_build": round(to_build, 3), # How many to build based on aggregated need and 'verfuegbar'
             "for_assembly": for_assembly_str, # Comma-separated list of parent assemblies
             "for_assembly_id": list(parent_root_ids), # Optional: include IDs if needed elsewhere
@@ -546,13 +549,6 @@ def calculate_required_parts(
     # Count how many sub-assemblies need to be built
     sub_assemblies_to_build = sum(1 for item in sub_assembly_list if item["to_build"] > 0)
 
-    # --- Temporary Debug Log for Part 1909 ---
-    part_1909_data = next((item for item in filtered_list if item.get("pk") == 1909), None)
-    if part_1909_data:
-        logging.info(f"DEBUG: Final data for Part 1909 before return: {part_1909_data}")
-    else:
-        logging.info("DEBUG: Part 1909 not found in the final filtered list to order.")
-    # --- End Temporary Debug Log ---
 
     if progress_callback:
         progress_callback(100, "Berechnung abgeschlossen.")

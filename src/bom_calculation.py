@@ -118,6 +118,11 @@ def get_recursive_bom(
                         f"Found sub-assembly: {sub_part_details.get('name')} (ID: {sub_part_id}) for root {root_input_id}, Qty: {total_sub_quantity}"
                     )
                     # Add to sub-assemblies tracking
+# --- BEGIN Enhanced Debug Logging ---
+                    current_val = sub_assemblies[root_input_id].get(sub_part_id, 0.0)
+                    logging.info(f"REC_BOM_DEBUG_DETAIL: Before Add: sub_assemblies[{root_input_id}][{sub_part_id}] = {current_val}")
+                    logging.info(f"REC_BOM_DEBUG_DETAIL: Adding total_sub_quantity = {total_sub_quantity} (quantity={quantity}, sub_quantity_per={sub_quantity_per})")
+                    # --- END Enhanced Debug Logging ---
                     sub_assemblies[root_input_id][sub_part_id] += total_sub_quantity
                     logging.info(f"REC_BOM_DEBUG: Added/Updated sub_assembly[{root_input_id}][{sub_part_id}] = {sub_assemblies[root_input_id][sub_part_id]}")
 
@@ -142,13 +147,19 @@ def get_recursive_bom(
                     verfuegbar = available_stock - required_val
                     logging.debug(f"Sub-assembly {sub_part_id}: Effective Available Stock (verfuegbar) = {available_stock} - {required_val} = {verfuegbar}")
 
+                    # Get the quantity currently being built for this sub-assembly
+                    # Assuming 'building' is fetched in get_part_details or similar upstream
+                    building_qty = sub_part_details.get("building", 0.0)
+
                     # Calculate how many need to be built based on effective stock and TOTAL aggregated requirement
                     # Use the aggregated requirement if provided (Pass 2), otherwise use the requirement from this specific path (Pass 1)
                     aggregated_qty = total_sub_assembly_reqs.get(sub_part_id, 0) if total_sub_assembly_reqs else total_sub_quantity
-                    to_build = max(0, aggregated_qty - verfuegbar)
+                    # Consider stock, external requirements, AND parts already in build orders ('building')
+                    effective_available_for_build = verfuegbar + building_qty
+                    to_build_adjusted = max(0, aggregated_qty - effective_available_for_build)
 
                     logging.debug(
-                        f"Sub-assembly {sub_part_details.get('name')} (ID: {sub_part_id}): Path Need {total_sub_quantity}, Aggregated Need {aggregated_qty}, Effective Available {verfuegbar}, To Build {to_build}"
+                        f"Sub-assembly {sub_part_details.get('name')} (ID: {sub_part_id}): Path Need {total_sub_quantity}, Aggregated Need {aggregated_qty}, Effective Available {verfuegbar}, Building {building_qty}, To Build (Adjusted) {to_build_adjusted}"
                     )
 
                     # Pass 2 Check: Skip if this sub-assembly's net components were already calculated
@@ -157,20 +168,25 @@ def get_recursive_bom(
                         continue # Skip to the next BOM item
 
                     # Only process BOM for the quantity that needs to be built
-                    if to_build > 0:
+                    if to_build_adjusted > 0: # Use the adjusted value
                         # Pass 2: Mark this sub-assembly as processed for net calculation
                         if processed_net_subassemblies is not None:
                             processed_net_subassemblies.add(sub_part_id)
                             logging.debug(f"Marking sub-assembly {sub_part_id} as processed for net calculation.")
 
-                        # Recursively process its BOM, but only for the quantity that needs to be built
+                        # Recursively process its BOM.
+                        # Pass 1 (Gross): Use the full quantity needed by this path (total_sub_quantity).
+                        # Pass 2 (Net): Use only the quantity that needs to be built (to_build).
+                        recursion_quantity = total_sub_quantity if part_requirements_data is None else to_build_adjusted # Use adjusted value in Pass 2
                         logging.debug(
-                            f"Recursively processing BOM for sub-assembly {sub_part_details.get('name')} (ID: {sub_part_id}), To Build Qty: {to_build}"
+                            f"Recursively processing BOM for sub-assembly {sub_part_details.get('name')} (ID: {sub_part_id}), " # Adjusted log message below
+                            f"Pass={'1 (Gross)' if part_requirements_data is None else '2 (Net)'}, "
+                            f"Quantity for Recursion: {recursion_quantity} (Total Path Need: {total_sub_quantity}, To Build Adjusted: {to_build_adjusted})"
                         )
                         get_recursive_bom(
                             api,
                             sub_part_id,
-                            to_build,  # Only process the quantity that needs to be built
+                            recursion_quantity, # Use calculated quantity based on pass
                             required_components,
                             root_input_id,
                             template_only_flags,
@@ -208,6 +224,16 @@ def get_recursive_bom(
                     )
                     # Quantity calculation depends on the part's consumable flag and the include_consumables setting
                     if include_consumables or not is_part_consumable:
+                        # --- BEGIN Specific Debug for 1503 Addition ---
+                        if sub_part_id == 1503 and root_input_id == 1344:
+                            current_val_before_add = required_components[root_input_id].get(sub_part_id, 0.0)
+                            qty_in_this_call = quantity # Capture the quantity parameter of this specific function call
+                            qty_per_in_bom = sub_quantity_per
+                            calculated_total_sub = qty_in_this_call * qty_per_in_bom
+                            logging.info(f"ADD_1503_DEBUG: Part=1503, Root=1344, Before Add Value={current_val_before_add}, "
+                                         f"Parent Qty (quantity param)={qty_in_this_call}, Qty/BOM={qty_per_in_bom}, "
+                                         f"Calculated Amount to Add={calculated_total_sub}")
+                        # --- END Specific Debug ---
                         required_components[root_input_id][
                             sub_part_id
                         ] += total_sub_quantity

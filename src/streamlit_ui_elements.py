@@ -197,7 +197,7 @@ def render_sub_assemblies_table(
 
             # Defensive check: Ensure DataFrame is not empty and has required columns
             # Ensure 'verfuegbar' is present, remove 'required_for_order'
-            required_cols = {"pk", "name", "quantity", "available_stock", "verfuegbar", "to_build", "for_assembly"}
+            required_cols = {"pk", "name", "quantity", "available_stock", "building", "verfuegbar", "to_build", "for_assembly"} # Added 'building'
 
             if df_full.empty or not required_cols.issubset(df_full.columns):
                 st.error(
@@ -225,6 +225,7 @@ def render_sub_assemblies_table(
                 "quantity",
                 "available_stock",
                 "verfuegbar", # New column
+                "building", # Added building column
                 "to_build",
                 "for_assembly",
             ]
@@ -240,6 +241,7 @@ def render_sub_assemblies_table(
                 "Benötigt (Gesamt)", # Renamed for clarity
                 "Auf Lager",
                 "Verfügbar", # New header
+                "Im Bau", # Added header for building
                 "Zu bauen",
                 "Für Assembly",
             ]
@@ -263,6 +265,7 @@ def render_sub_assemblies_table(
                 "Benötigt (Gesamt)": st.column_config.NumberColumn(format="%.2f", width="small", help="Gesamt benötigte Menge für alle Ziel-Assemblies."),
                 "Auf Lager": st.column_config.NumberColumn(format="%.2f", width="small"),
                 "Verfügbar": st.column_config.NumberColumn(format="%.2f", width="small", help="Verfügbarer Bestand nach Abzug des Gesamtbedarfs (kann negativ sein)."), # New config
+                "Im Bau": st.column_config.NumberColumn(format="%.2f", width="small", help="Menge, die sich aktuell in Fertigungsaufträgen befindet."), # Added config for building
                 "Zu bauen": st.column_config.NumberColumn(format="%.2f", width="small", help="Anzahl, die gebaut werden muss (Benötigt (Gesamt) - Auf Lager)"), # Updated help text
                 "Für Assembly": st.column_config.TextColumn(width="large"),
             }
@@ -282,6 +285,7 @@ def render_sub_assemblies_table(
                 "quantity",
                 "available_stock",
                 "verfuegbar", # New column
+                "building", # Added building column
                 "to_build",
                 "for_assembly",
                 "for_assembly_id",
@@ -298,6 +302,7 @@ def render_sub_assemblies_table(
                 "Benötigt (Gesamt)", # Renamed for clarity
                 "Auf Lager",
                 "Verfügbar", # New header
+                "Im Bau", # Added header for building
                 "Zu bauen",
                 "Für Assembly",
                 "Assembly ID",

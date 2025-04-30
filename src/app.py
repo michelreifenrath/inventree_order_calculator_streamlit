@@ -5,41 +5,73 @@ from collections import defaultdict
 
 # import itertools # No longer needed for groupby
 import logging
-import os  # Import os module
-from dotenv import load_dotenv  # Import load_dotenv
+import os
+from dotenv import load_dotenv, find_dotenv
+
+# --- Load .env file FIRST to get LOG_LEVEL ---
+# Find and load .env file before configuring logging
+dotenv_path = find_dotenv()
+if dotenv_path:
+    load_dotenv(dotenv_path=dotenv_path, verbose=True)
+else:
+    print("WARNING: .env file not found. Using default settings.") # Use print as logging not set yet
+
+# --- Configure Logging based on Environment Variable ---
+# Get log level from environment, default to INFO
+log_level_name = os.getenv('LOG_LEVEL', 'INFO').upper()
+log_level_map = {
+    'DEBUG': logging.DEBUG,
+    'INFO': logging.INFO,
+    'WARNING': logging.WARNING,
+    'ERROR': logging.ERROR,
+    'CRITICAL': logging.CRITICAL
+}
+log_level = log_level_map.get(log_level_name, logging.INFO) # Default to INFO if invalid
+
+# Configure root logger - THIS SHOULD BE THE ONLY basicConfig CALL
+logging.basicConfig(
+    level=log_level, format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
+# Get the logger for this module (app.py)
+log = logging.getLogger(__name__)
+log.info(f"Logging configured with level: {logging.getLevelName(log_level)}") # Log the effective level
+
+# --- Import Streamlit and other standard libraries AFTER logging setup ---
+import streamlit as st
+import pandas as pd
+from collections import defaultdict
 
 # --- Streamlit App Konfiguration ---
 st.set_page_config(page_title="InvenTree Order Calculator", layout="wide")
-# Importiere die refaktorierte Logik und UI Elemente
+
+# --- Import Project Modules AFTER Logging Setup ---
+# These modules will now inherit the configured log level
 from inventree_logic import ( # Relative import
     calculate_required_parts,
-    # Functions needed for cache clearing are now in helpers, but might be needed if called directly elsewhere
-    # If not called directly, they can be removed from here. Assuming they might be needed for reset.
-    # get_part_details,
-    # get_bom_items,
-    # get_final_part_data
 )
 from inventree_api_helpers import ( # Relative import
-    connect_to_inventree,  # Import from new location
-    get_parts_in_category,  # Import from new location
-    get_part_details,  # Needed for cache clearing
-    get_bom_items,  # Needed for cache clearing
-    get_final_part_data,  # Needed for cache clearing
+    connect_to_inventree,
+    get_parts_in_category,
+    get_part_details, # Needed for cache clearing
+    get_bom_items,    # Needed for cache clearing
+    get_final_part_data, # Needed for cache clearing
 )
 from streamlit_ui_elements import ( # Relative import
     render_assembly_inputs,
     render_results_table,
     render_sub_assemblies_table,
-)  # Import UI functions
+    render_save_load_controls, # Moved import here
+)
 from database_helpers import init_db
-from streamlit_ui_elements import render_save_load_controls
+
 
 st.title("📊 InvenTree Order Calculator")
 # --- Inject Custom CSS ---
 st.markdown(
     """
     <style>
-section[data-testid="stSidebar"][aria-expanded="true"] {
+    section[data-testid="stSidebar"][aria-expanded="true"] {
         max-width: 50% !important; /* Apply max-width only when expanded */
     }
     /* Add other custom CSS rules below if needed */
@@ -54,33 +86,13 @@ init_db()
 # --- Konstanten ---
 TARGET_CATEGORY_ID = 191  # ID der Zielkategorie für die Teileauswahl
 
-# Konfiguriere Logging (optional, um Logs in der Konsole zu sehen)
-# Streamlit kann Logs nicht direkt in der UI anzeigen, außer man fängt sie speziell ab.
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
-log = logging.getLogger(__name__)
-
-# --- Lade Umgebungsvariablen aus .env Datei ---
-# Explicitly find and load .env file
-from dotenv import find_dotenv
-
-dotenv_path = find_dotenv()
-loaded = load_dotenv(
-    dotenv_path=dotenv_path, verbose=True
-)  # Add verbose=True for debug output
-print(f"Attempting to load .env file from: {dotenv_path}")
-print(f".env file loaded successfully: {loaded}")
-
+# Environment variables should already be loaded by now
 
 # --- Verbindung zur API (mit Caching aus inventree_logic) ---
 inventree_url = os.getenv("INVENTREE_URL")
 inventree_token = os.getenv("INVENTREE_TOKEN")
 
-# --- Debugging Print Statements ---
-print(f"Read INVENTREE_URL from environment: {inventree_url}")
-print(f"Read INVENTREE_TOKEN from environment: {inventree_token}")
-# --- End Debugging ---
+# --- End Debugging --- # Removed debug prints for URL/Token
 if not inventree_url or not inventree_token:
     st.error(
         "🚨 Fehler: INVENTREE_URL und/oder INVENTREE_TOKEN nicht in der .env Datei oder Umgebungsvariablen gefunden!"

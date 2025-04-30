@@ -76,6 +76,7 @@ def get_part_details(_api: InvenTreeAPI, part_id: int) -> Optional[Dict[str, any
             "in_stock": float(part._data.get("in_stock", 0) or 0),
             "is_template": bool(part._data.get("is_template", False)),
             "variant_stock": float(part._data.get("variant_stock", 0) or 0),
+            "building": float(part._data.get("building", 0) or 0), # Fetch building quantity
         }
         return details
     except Exception as e:
@@ -183,6 +184,7 @@ def get_final_part_data(
             "manufacturer_name": None,
             "supplier_names": [],  # Default empty list for suppliers
             "is_haip_part": False, # Default HAIP flag
+            "building": 0.0,       # Default building quantity
         }
 
     # --- Fetch Base Part Data (including manufacturer) ---
@@ -207,6 +209,7 @@ def get_final_part_data(
                     "is_template",
                     "variant_stock",
                     "manufacturer_name",
+                    "building", # Add building field here
                 ],
             )
         )
@@ -233,6 +236,7 @@ def get_final_part_data(
                 variant_stock = part._data.get("variant_stock", 0) or 0
                 is_template = part._data.get("is_template", False)
                 manufacturer_name = part._data.get("manufacturer_name")
+                building = part._data.get("building", 0) or 0 # Get building quantity
                 final_data[part.pk] = {
                     "name": part.name,
                     "in_stock": float(stock) if stock is not None else 0.0,
@@ -242,6 +246,7 @@ def get_final_part_data(
                     "supplier_names": [],  # Initialize suppliers list
                     "supplier_parts": [], # Initialize detailed supplier parts list
                     "is_haip_part": False, # Initialize HAIP flag
+                    "building": float(building) if building is not None else 0.0, # Add building quantity
                 }
             log.info(f"Successfully fetched base details for {len(final_data)} parts.")
 
@@ -273,6 +278,7 @@ def get_final_part_data(
                 final_data[part_id].setdefault("supplier_names", [])
                 final_data[part_id].setdefault("supplier_parts", [])
                 final_data[part_id].setdefault("is_haip_part", False) # Ensure default HAIP flag
+                final_data[part_id].setdefault("building", 0.0) # Ensure default building quantity
 
     # --- Fetch Supplier Data using Part objects (Corrected Approach) ---
     if (
@@ -399,6 +405,7 @@ def get_final_part_data(
                 final_data[part_id]["supplier_parts"] = supplier_part_details # Add the detailed list even for default
                 # Check if "HAIP Solutions" is among the suppliers even for default entry
                 final_data[part_id]["is_haip_part"] = "HAIP Solutions" in supplier_list
+                # Building quantity should already be set from base fetch or default
 
 
         log.info("Finished mapping supplier names and setting HAIP flag.")
